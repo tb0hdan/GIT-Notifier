@@ -1,0 +1,697 @@
+#!/usr/bin/env python
+
+import optparse
+import os
+import shutil
+import socket
+import sys
+import subprocess
+import tempfile
+import time
+
+import smtplib
+from re import sub as re_sub
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+try:
+    from pygments import highlight
+    from pygments.lexers import DiffLexer
+    from pygments.formatters import HtmlFormatter
+    pygments_available = True
+except:
+    pygments_available = False
+
+VERSION   = "0.3-16"  # Filled in automatically.
+
+Name      = "git-notifier"
+CacheFile = ".%s.dat" % Name
+Separator = "\n>%s\n" % ('-' * 62)
+NoDiff    = "[nodiff]"
+NoMail    = "[nomail]"
+
+
+gitolite = "GL_USER" in os.environ
+whoami = os.environ["LOGNAME"]
+sender = os.environ["GL_USER"] if gitolite else whoami
+
+Options = [
+    # Name, argument, default, help,
+    ("allchanges", True, set(), "branches for which *all* changes are to be reported"),
+    ("altsubject", False, False, "enables alternative subject with repository name"),
+    ("debug", False, False, "enable debug output"),
+    ("diff", True, None, "mail out diffs between two revisions"),
+    ("emailprefix", True, "[git]", "Subject prefix for mails"),
+    ("hostname", True, socket.gethostname(), "host where the repository is hosted"),
+    ("log", True, "%s.log" % Name, "set log output"),
+    ("mailinglist", True, whoami, "destination address for mails"),
+    ("smtpserver", True, 'localhost', "tells SMTP server to use, host only"),
+    ("manual", True, None, "notify for a manually given set of revisions"),
+    ("maxdiffsize", True, 50, "limit the size of diffs in mails (KB)"),
+    ("colordiff", False, False, "colorize diffs using pygments library"),
+    ("noupdate", False, False, "do not update the state file"),
+    ("repouri", True, None, "full URI for the repository"),
+    ("sender", True, sender, "sender address for mails"),
+    ("link", True, None, "Link to insert into mail, %s will be replaced with revision"),
+    ("updateonly", False, False, "update state file only, no mails"),
+    ("users", True, None, "location of a user-to-email mapping file"),
+    ("replyto", True, None, "email address for reply-to header"),
+    ("mergediffs", True, set(), "branches for which complete merge diffs are to be included"),
+    ]
+
+
+class State:
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.heads = {}
+        self.tags = {}
+        self.revs = set()
+        self.diffs = set()
+
+        self.reported = set() # Revs reported this run so far.
+
+    def writeTo(self, file):
+        if os.path.exists(CacheFile):
+            try:
+                shutil.move(CacheFile, CacheFile + ".bak")
+            except IOError:
+                pass
+
+        out = open(file, "w")
+
+        for (head, ref) in self.heads.items():
+            print >>out, "head", head, ref
+
+        for (tag, ref) in self.tags.items():
+            print >>out, "tag", tag, ref
+
+        for rev in self.revs:
+            print >>out, "rev", rev
+
+        # No longer used.
+        #
+        # for rev in self.diffs:
+        #     print >>out, "diff", rev
+
+    def readFrom(self, file):
+        self.clear()
+
+        for line in open(file):
+
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            m = line.split()
+
+            if len(m) == 3:
+                (type, key, val) = (m[0], m[1], m[2])
+            else:
+                # No heads.
+                (type, key, val) = (m[0], m[1], "")
+
+            if type == "head":
+                self.heads[key] = val
+
+            elif type == "tag":
+                self.tags[key] = val
+
+            elif type == "rev":
+                self.revs.add(key)
+
+            elif type == "diff":
+                self.diffs.add(key)
+
+            else:
+                error("unknown type %s in cache file" % type)
+
+class GitConfig:
+    def __init__(self, args):
+        self.parseArgs(args)
+        self.maxdiffsize *= 1024 # KBytes to bytes.
+
+        if self.allchanges and not isinstance(self.allchanges, set):
+            self.allchanges = set([head.strip() for head in self.allchanges.split(",")])
+
+        if self.mergediffs and not isinstance(self.mergediffs, set):
+            self.mergediffs = set([head.strip() for head in self.mergediffs.split(",")])
+
+        if not self.debug:
+            self.log = open(self.log, "a")
+        else:
+            self.log = sys.stderr
+
+        if not self.users and "GL_ADMINDIR" in os.environ:
+            users = os.path.join(os.environ["GL_ADMINDIR"], "conf/sender.cfg")
+            if os.path.exists(users):
+                self.users = users
+
+        self.readUsers()
+
+    def parseArgs(self, args):
+
+        parser = optparse.OptionParser(version=VERSION)
+
+        for (name, arg, default, help) in Options:
+            defval = self._git_config(name, default)
+
+            if isinstance(default, int):
+                defval = int(defval)
+
+            if not arg:
+                defval = bool(defval)
+
+            if not arg:
+                action = "store_true" if not default else "store_false"
+                parser.add_option("--%s" % name, action=action, dest=name, default=defval, help=help)
+
+            else:
+                type = "string" if not isinstance(default, int) else "int"
+                parser.add_option("--%s" % name, action="store", type=type, default=defval, dest=name, help=help)
+
+        (options, args) = parser.parse_args(args)
+
+        if len(args) != 0:
+            parser.error("incorrect number of arguments")
+
+        for (name, arg, default, help) in Options:
+            self.__dict__[name] = options.__dict__[name]
+
+    def readUsers(self):
+        if self.users and os.path.exists(self.users):
+            for line in open(self.users):
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+
+                m = line.split()
+
+                if self.sender == m[0]:
+                    self.sender = " ".join(m[1:])
+                    break
+
+    def _git_config(self, key, default):
+        cfg = git(["config hooks.%s" % key])
+        return cfg[0] if cfg else default
+
+class Colorer:
+    def __init__(self):
+        if pygments_available:
+            self.formatter = HtmlFormatter(linenos=True, full=True)
+            self.lexerobj  = DiffLexer()
+
+    def format_diff(self,data=None):
+        self.data = data
+        if self.data:
+            try:
+                self.result = highlight(self.data, self.lexerobj, self.formatter)
+            except:
+                self.result = data
+        return self.result
+
+
+def log(msg):
+    print >>Config.log, "%s - %s" % (time.asctime(), msg)
+
+def error(msg):
+    log("Error: %s" % msg)
+    sys.exit(1)
+
+def git(args, stdout_to=subprocess.PIPE, all=False):
+    if isinstance(args, tuple) or isinstance(args, list):
+        args = " ".join(args)
+
+    try:
+        if Config.debug:
+            print >>sys.stderr, "> git " + args
+    except NameError:
+        # Config may not be defined yet.
+        pass
+
+    try:
+        child = subprocess.Popen("git " + args, shell=True, stdin=None, stdout=stdout_to, stderr=subprocess.PIPE)
+        (stdout, stderr) = child.communicate()
+    except OSError, e:
+        error("cannot start git: %s" % str(e))
+
+    if child.returncode != 0 and stderr:
+        msg = ": %s" % stderr if stderr else ""
+        error("git child failed with exit code %d%s" % (child.returncode, msg))
+
+    if stdout_to != subprocess.PIPE:
+        return []
+
+    if not all:
+        return [line.strip() for line in stdout.split("\n") if line]
+    else:
+        return stdout.split("\n")
+
+def getHeads(state):
+    for (rev, head) in [head.split() for head in git("show-ref --heads")]:
+        if head.startswith("refs/heads/"):
+            head = head[11:]
+
+        state.heads[head] = rev
+
+def getTags(state):
+    for (rev, tag) in [head.split() for head in git("show-ref --tags")]:
+        # We are only interested in annotaged tags.
+        type = git("cat-file -t %s" % rev)[0]
+
+        if type == "tag":
+            if tag.startswith("refs/tags/"):
+                tag= tag[10:]
+
+            state.tags[tag] = rev
+
+def getReachableRefs(state):
+    for rev in git(["rev-list"] + state.heads.keys() + state.tags.keys()):
+        state.revs.add(rev)
+
+def getCurrent():
+    state = State()
+    getHeads(state)
+    getTags(state)
+    getReachableRefs(state)
+
+    return state
+
+Tmps = []
+
+def makeTmp():
+    global Tmps
+
+    (fd, fname) = tempfile.mkstemp(prefix="%s-" % Name, suffix=".tmp")
+    Tmps += [fname]
+
+    return (os.fdopen(fd, "w"), fname)
+
+def deleteTmps():
+    for tmp in Tmps:
+        os.unlink(tmp)
+
+def _getRepo():
+    repo = Config.repouri
+    if not repo:
+        if gitolite:
+            # Gitolite version.
+            repo = "ssh://%s@%s/%s" % (whoami, Config.hostname, os.path.basename(os.getcwd()))
+        else:
+            # Standard version.
+            repo = "ssh://%s/%s" % (Config.hostname, os.path.basename(os.getcwd()))
+        if repo.endswith(".git"):
+            repo = repo[0:-4]
+    return repo
+
+def mailTag(key, value):
+    return "%-11s: %s" % (key, value)
+
+def generateMailHeader(subject):
+    repo = _getRepo()
+    # Reply-To equals to sender, if not set.
+    replyto = "Reply-To: %s\n" % Config.replyto if Config.replyto else Config.sender
+    if Config.altsubject:
+        subject = ('Repository: %s Branch: %s ' % (re_sub('ssh://(.+)/', '',repo), subject))
+
+    # Create message container - the correct MIME type is multipart/alternative.
+    msg = MIMEMultipart('alternative')
+    # Set message headers
+    msg['From'] = Config.sender
+    msg['To'] = Config.mailinglist
+    msg['Subject'] = Config.emailprefix + subject
+    msg['Reply-To'] = replyto
+    msg['X-Git-Repository'] = repo
+    msg['X-Mailer'] = Name + ' ' + VERSION
+
+    # Return the message object
+    return msg
+
+def sendMail(out, fname):
+    out.close()
+    if Config.debug:
+        for line in open(fname):
+            print "    |", line,
+        print ""
+    else:
+        _f = open(fname, 'r+b')
+        _data = _f.read()
+        _f.close()
+        s = smtplib.SMTP(Config.smtpserver)
+        s.sendmail(Config.sender, Config.mailinglist, _data)
+        s.quit()
+
+
+def entryAdded(key, value, rev):
+    log("New %s %s" % (key, value))
+    # Start with reasonable defaults.
+    text      = ""
+    html      = "<html>\n"
+
+    (out, fname) = makeTmp()
+    msg = generateMailHeader("%s '%s' created" % (key, value))
+
+    text += mailTag("New %s" % key, value)
+    text += mailTag("Referencing", rev)
+    if Config.colordiff:
+        html += mailTag("New %s" % key, value)
+        html += mailTag("Referencing", rev)
+
+    # Record the MIME types of both parts - text/plain and text/html.
+    part1 = MIMEText(text, 'plain')
+    msg.attach(part1)
+    if Config.colordiff:
+        part2 = MIMEText(html, 'html')
+        msg.attach(part2)
+
+    # print whole message to file
+    print >>out, msg
+    sendMail(out, fname)
+
+def entryDeleted(key, value):
+    log("Deleted %s %s" % (key, value))
+    # Start with reasonable defaults.
+    text      = ""
+    html      = "<html>\n"
+    (out, fname) = makeTmp()
+    msg = generateMailHeader("%s '%s' deleted" % (key, value))
+
+    text += mailTag("Deleted %s" % key, value)
+    if Config.colordiff:
+        html += mailTag("Deleted %s" % key, value)
+
+    # Record the MIME types of both parts - text/plain and text/html.
+    part1 = MIMEText(text, 'plain')
+    msg.attach(part1)
+    if Config.colordiff:
+        part2 = MIMEText(html, 'html')
+        msg.attach(part2)
+
+    # print whole message to file
+    print >>out, msg
+    sendMail(out, fname)
+
+# Sends a mail for a notification consistent of two parts: (1) the output of a
+# show command, and (2) the output of a diff command.
+def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
+    # Start with reasonable defaults.
+    text      = ""
+    html      = "<html>\n"
+    repo = _getRepo()
+    msg = generateMailHeader(subject)
+    (out, fname) = makeTmp()
+    #
+    text += mailTag("Repository", repo) + "\n"
+    if Config.colordiff:
+        html += "<br>%s" % mailTag("Repository", repo)
+
+    multi = "es" if len(heads) > 1 else ""
+    heads = ",".join(heads)
+
+    text += mailTag("On branch%s" % multi, heads)
+    if Config.colordiff:
+        html +="<br>%s" % mailTag("On branch%s" % multi, heads)
+
+    if Config.link:
+        url = Config.link.replace("%s", rev)
+        text += mailTag("Link", url)
+        if Config.colordiff:
+            html += "<br>%s" % mailTag("Link", url)
+
+    footer = ""
+    show = git(show_cmd)
+
+    for line in show:
+        if NoDiff in line:
+            break
+
+        if NoMail in line:
+            return
+
+    else:
+        (tmp, tname) = makeTmp()
+        diff = git(diff_cmd, stdout_to=tmp)
+        tmp.close()
+
+        size = os.path.getsize(tname)
+        if size > Config.maxdiffsize:
+            footer = "\nDiff suppressed because of size. To see it, use:\n\n    git %s" % diff_cmd
+            tname = None
+
+    text += Separator
+    if Config.colordiff:
+        html += "<br>%s" % Separator
+
+    for line in git(show_cmd, all=True):
+        if line == "---":
+            text += Separator
+            if Config.colordiff:
+                html += "<br>%s" % Separator
+        else:
+            text += line + "\n"
+            if Config.colordiff:
+                html += "<br>%s" % line
+
+    text += Separator
+    if Config.colordiff:
+        html += "<br>%s" % Separator
+
+    # Text only, read diff from file
+    if tname:
+        for line in open(tname):
+            text += line
+
+    # HTML only, read and parse diff
+    if Config.colordiff:
+        colorer = Colorer()
+        _f = open(tname, 'r+b')
+        _data = _f.read()
+        _f.close()
+        html += colorer.format_diff(_data)
+
+    text += footer
+    if Config.colordiff:
+        html += "<br>%s" % footer
+
+    if Config.debug:
+        text += "-- "
+        text += "debug: show_cmd = git %s" % show_cmd
+        text += "debug: diff_cmd = git %s" % diff_cmd
+        if Config.colordiff:
+            html += "<br>-- "
+            html += "<br>debug: show_cmd = git %s" % show_cmd
+            html += "<br>debug: diff_cmd = git %s" % diff_cmd
+
+    # Record the MIME types of both parts - text/plain and text/html.
+    part1 = MIMEText(text, 'plain')
+    msg.attach(part1)
+    if Config.colordiff:
+        part2 = MIMEText(html, 'html')
+        msg.attach(part2)
+
+    # print whole message to file
+    print >>out, msg
+    sendMail(out, fname)
+
+# Sends notification for a specific revision.
+def commit(current, rev, force=False, subject_head=None):
+    if rev in current.reported and not force:
+        # Already reported in this run of the script.
+        log("Flagged revision %s for notification, but already reported this time" % rev)
+        return
+
+    log("New revision %s" % rev)
+    current.reported.add(rev)
+
+    heads = [head.split()[-1] for head in git("branch --contains=%s" % rev)]
+    if not subject_head:
+        subject_head = ",".join(heads)
+
+    merge_diff = "--cc"
+
+    for head in heads:
+        if head in Config.allchanges or head in Config.mergediffs:
+            merge_diff = "-m"
+
+    subject = git("show '--pretty=format:%%s (%%h)' -s %s" % rev)
+    subject = "%s: %s" % (subject_head, subject[0])
+
+    show_cmd = "show -s --no-color --find-copies-harder --pretty=medium %s" % rev
+    diff_cmd = "diff-tree --patch-with-stat --no-color --find-copies-harder --ignore-space-at-eol %s %s" % (merge_diff, rev)
+
+    sendChangeMail(rev, subject, heads, show_cmd, diff_cmd)
+
+# Sends a diff between two revisions.
+#
+# Only used in manual mode now.
+def diff(head, first, last):
+    # We record a pseudo-revision to avoid sending the same diff twice.
+    rev = "%s-%s" % (head, last)
+    if not rev in current.diffs:
+        log("New diff revision %s" % rev)
+        current.diffs.add(rev)
+
+    log("Diffing %s..%s" % (first, last))
+
+    subject = git("show '--pretty=format:%%s (%%h)' -s %s" % last)
+    subject = "%s diff: %s" % (head, subject[0])
+
+    heads = [head]
+
+    show_cmd = "show -s --no-color --find-copies-harder --pretty=medium %s" % last
+    diff_cmd = "diff --patch-with-stat -m --no-color --find-copies-harder --ignore-space-at-eol %s %s" % (first, last)
+
+    sendChangeMail(last, subject, heads, show_cmd, diff_cmd)
+
+# Sends pair-wise diffs for a path of revisions. Also records all revision on
+# the path as seen.
+#
+# Only used in manual mode now.
+def diffPath(head, revs):
+    last = None
+
+    for rev in revs:
+        if last:
+            diff(head, last, rev)
+        last = rev
+
+# Sends a commit notifications for a set of revisions.
+def reportPath(current, revs, force=False, subject_head=None):
+    if not revs:
+        return
+
+    # Sort updates by time.
+    revs = git("rev-list --no-walk --reverse --date-order %s" % " ".join(revs))
+
+    for rev in revs:
+        commit(current, rev, force=force, subject_head=subject_head)
+
+# Sends a summary mail for a set of revisions.
+def headMoved(head, path):
+    log("Head moved: %s -> %s" % (head, path[-1]))
+    # Start with reasonable defaults.
+    text      = ""
+    html      = "<html>\n"
+    (out, fname) = makeTmp()
+
+    subject = git("show '--pretty=format:%%s (%%h)' -s %s" % path[-1])
+
+    mgs = generateMailHeader("%s's head updated: %s" % (head, subject[0]))
+
+    text += "Branch '%s' now includes:" % head
+    text += ""
+    if Config.colordiff:
+        html += "<br>Branch '%s' now includes:" % head
+        html += "<br>"
+
+    for rev in path:
+        text += "    " + str(git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0])
+        if Config.colordiff:
+            html += "<br>" % str(git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0])
+
+
+    # Record the MIME types of both parts - text/plain and text/html.
+    part1 = MIMEText(text, 'plain')
+    msg.attach(part1)
+    if Config.colordiff:
+        part2 = MIMEText(html, 'html')
+        msg.attach(part2)
+
+    # print whole message to file
+    print >>out, msg
+    sendMail(out, fname)
+
+Config = GitConfig(sys.argv[1:])
+
+log("Running for %s" % os.getcwd())
+
+if Config.debug:
+    for (name, arg, default, help) in Options:
+        print >>sys.stderr, "[Option %s: %s]" % (name, Config.__dict__[name])
+
+cache = State()
+
+if os.path.exists(CacheFile):
+    cache.readFrom(CacheFile)
+    report = (not Config.updateonly)
+else:
+    log("Initial run. Not generating any mails, just recording current state.")
+    report = False
+
+current = getCurrent()
+
+if Config.diff:
+    # Manual diff mode. The argument must be of the form "[old-rev..]new-rev".
+    path = [rev.strip() for rev in Config.diff.split("..")]
+    if len(path) == 1:
+        path = ("%s~2" % path[0], path[0]) # sic! ~2.
+    else:
+        path = ("%s~1" % path[0], path[1])
+
+    revs = git(["rev-list", "--reverse --date-order", path[1], "^%s" % path[0]])
+
+    diffPath("<manual-diff>", revs)
+
+    sys.exit(0)
+
+if Config.manual:
+    # Manual report mode. The argument must be of the form "[old-rev..]new-rev".
+    path = [rev.strip() for rev in Config.manual.split("..")]
+    if len(path) == 1:
+        path = ("%s~1" % path[0], path[0])
+
+    revs = git(["rev-list", "--reverse --date-order", path[1], "^%s" % path[0]])
+    reportPath(current, revs, force=True)
+
+    sys.exit(0)
+
+if report:
+    # Check for changes to the set of heads.
+    old = set(cache.heads.keys())
+    new = set(current.heads.keys())
+
+    for head in (new - old):
+        entryAdded("branch", head, current.heads[head])
+
+    for head in (old - new):
+        entryDeleted("branch", head)
+
+    stable_heads = new & old
+    Config.allchanges = Config.allchanges & stable_heads
+
+    # Check tags.
+    old = set(cache.tags.keys())
+    new = set(current.tags.keys())
+
+    for tag in (new - old):
+        entryAdded("tag", tag, current.tags[tag])
+
+    for tag in (old - new):
+        entryDeleted("tag", tag)
+
+    # Notify for unreported commits.
+    old = set(cache.revs)
+    new = set(current.revs)
+    new_revs = (new - old)
+    reportPath(current, new_revs)
+
+    # Do reports for the heads we want to see everything for.
+    for head in stable_heads:
+        old_rev = cache.heads[head]
+        new_rev = current.heads[head]
+        path = git(["rev-list", "--reverse --date-order", new_rev, "^%s" % old_rev])
+
+        if head in Config.allchanges:
+            # Want to see all commits for this head, even if already reported
+            # in the past for some other. So we record these separately.
+            reportPath(current, path, subject_head=head)
+        else:
+            # Just send a summary for heads that now include some new stuff.
+            if len(set(path) - new_revs):
+                headMoved(head, path)
+
+if not Config.noupdate:
+    current.writeTo(CacheFile)
+
+deleteTmps()
