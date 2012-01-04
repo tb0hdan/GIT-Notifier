@@ -10,7 +10,7 @@ import tempfile
 import time
 
 import smtplib
-from re import sub as re_sub
+from re import sub as re_sub, search as re_search
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -27,6 +27,7 @@ VERSION   = "0.3-16"  # Filled in automatically.
 Name      = "git-notifier"
 CacheFile = ".%s.dat" % Name
 Separator = "\n>%s\n" % ('-' * 62)
+Separhtml = "<hr>"
 NoDiff    = "[nodiff]"
 NoMail    = "[nomail]"
 
@@ -197,6 +198,10 @@ class GitConfig:
         return cfg[0] if cfg else default
 
 class Colorer:
+    '''
+    Simple class that uses Pygments library to provide colorized
+    output (full HTML) for diffs.
+    '''
     def __init__(self):
         if pygments_available:
             self.formatter = HtmlFormatter(linenos=True, full=True)
@@ -210,6 +215,45 @@ class Colorer:
             except:
                 self.result = data
         return self.result
+
+class PrettyHTML:
+    '''
+    Simple class to make 'git show' message look prettier
+    '''
+    def __init__(self):
+        self.keywords = ['commit', 'Author:', 'Date:']
+        # If True all next messages are not checked against keywords
+        self.keywords_trigger = False
+        # Contains additional tags before the commit message
+        self.extra_tags = ''
+
+    def make_bold(self, keyword, line):
+        if (re_search(keyword, line) != None) and (self.keywords_trigger == False):
+            if re_search(':', keyword) == None:
+                replacement = '%s:' % keyword
+            else:
+                replacement = keyword
+            line = line.replace(keyword, '<b>%s</b>' % replacement)
+            line = "<br>%s" % line
+        return line
+
+    def convert(self, line):
+        replacements = 0
+        for keyword in self.keywords:
+            line_orig = line
+            line = self.make_bold(keyword, line)
+            if line <> line_orig:
+                replacements += 1
+        # No replacements were made, assume we have commit message
+        if replacements == 0:
+            if self.keywords_trigger == False:
+                self.keywords_trigger = True
+                self.extra_tags = '<br>'
+            else:
+                # Only on-change lines should have extra tags
+                self.extra_tags = ''
+            line = '%s<br><b>%s</b>' % (self.extra_tags, line)
+        return line
 
 
 def log(msg):
@@ -355,8 +399,8 @@ def entryAdded(key, value, rev):
     text += mailTag("New %s" % key, value)
     text += mailTag("Referencing", rev)
     if Config.colordiff:
-        html += mailTag("New %s" % key, value)
-        html += mailTag("Referencing", rev)
+        html += mailTag("<b>New</b> %s" % key, value)
+        html += mailTag("<b>Referencing</b>", rev)
 
     # Record the MIME types of both parts - text/plain and text/html.
     part1 = MIMEText(text, 'plain')
@@ -379,7 +423,7 @@ def entryDeleted(key, value):
 
     text += mailTag("Deleted %s" % key, value)
     if Config.colordiff:
-        html += mailTag("Deleted %s" % key, value)
+        html += mailTag("<b>Deleted</b> %s" % key, value)
 
     # Record the MIME types of both parts - text/plain and text/html.
     part1 = MIMEText(text, 'plain')
@@ -399,25 +443,27 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
     text      = ""
     html      = "<html>\n"
     repo = _getRepo()
+    # The 'git show' prettifier
+    prettyhtml = PrettyHTML()
     msg = generateMailHeader(subject)
     (out, fname) = makeTmp()
     #
     text += mailTag("Repository", repo) + "\n"
     if Config.colordiff:
-        html += "<br>%s" % mailTag("Repository", repo)
+        html += "<br>%s" % mailTag("<b>Repository</b>", repo)
 
     multi = "es" if len(heads) > 1 else ""
     heads = ",".join(heads)
 
     text += mailTag("On branch%s" % multi, heads)
     if Config.colordiff:
-        html +="<br>%s" % mailTag("On branch%s" % multi, heads)
+        html +="<br>%s" % mailTag("<b>On branch</b>%s" % multi, heads)
 
     if Config.link:
         url = Config.link.replace("%s", rev)
         text += mailTag("Link", url)
         if Config.colordiff:
-            html += "<br>%s" % mailTag("Link", url)
+            html += "<br>%s" % mailTag("<b>Link</b>", url)
 
     footer = ""
     show = git(show_cmd)
@@ -441,21 +487,23 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
 
     text += Separator
     if Config.colordiff:
-        html += "<br>%s" % Separator
+        # Use nice <hr> in html mode
+        html += "<br>%s\n" % Separhtml
 
     for line in git(show_cmd, all=True):
         if line == "---":
             text += Separator
             if Config.colordiff:
-                html += "<br>%s" % Separator
+                # Use nice <hr> in html mode
+                html += "<br>%s\n" % Separhtml
         else:
             text += line + "\n"
             if Config.colordiff:
-                html += "<br>%s" % line
+                html += prettyhtml.convert(line)
 
     text += Separator
     if Config.colordiff:
-        html += "<br>%s" % Separator
+        html += "<br>%s\n" % Separhtml
 
     # Text only, read diff from file
     if tname:
@@ -479,7 +527,8 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
         text += "debug: show_cmd = git %s" % show_cmd
         text += "debug: diff_cmd = git %s" % diff_cmd
         if Config.colordiff:
-            html += "<br>-- "
+            # Use nice <hr> in html mode
+            html += "<br>%s" % Separhtml
             html += "<br>debug: show_cmd = git %s" % show_cmd
             html += "<br>debug: diff_cmd = git %s" % diff_cmd
 
@@ -582,7 +631,7 @@ def headMoved(head, path):
     text += "Branch '%s' now includes:" % head
     text += ""
     if Config.colordiff:
-        html += "<br>Branch '%s' now includes:" % head
+        html += "<br><b>Branch</b> '%s' now includes:" % head
         html += "<br>"
 
     for rev in path:
