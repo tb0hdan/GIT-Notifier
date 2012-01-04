@@ -16,7 +16,7 @@ Main differences:
 
 ## Sample output
 
-- _Sample: http://tb0hdan.github.com/GIT-Notifier/
+- _Sample: http://tb0hdan.github.com/GIT-Notifier/sample.html
 
 ## Authorship
 
