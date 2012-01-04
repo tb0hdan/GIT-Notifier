@@ -2,14 +2,14 @@
 
 ## Description
 
-This is fork of ICIR's git-notifier that implements colorized diff support
+This is a fork of ICIR.org git-notifier that implements colorized diff support
 plus some other nice things.
 
 ## Features
 
 Main differences:
 
-* --altsubject support (Software repository in subject)
+* --altsubject support (Software repository name in subject)
 * --colordiff support (Uses Pygments library)
 * --smtpserver support (Uses smtplib)
 
@@ -20,7 +20,7 @@ Main differences:
 
 ## Authorship
 
-Created by Robin Sommers
+Created by Robin Sommer
 
 Patches contributed by:
 
@@ -33,4 +33,3 @@ See COPYING
 ## More info
 
 See README.orig
-
