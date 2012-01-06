@@ -61,7 +61,7 @@ Options = [
     ]
 
 
-class State:
+class State(object):
     def __init__(self):
         self.clear()
 
@@ -128,7 +128,7 @@ class State:
             else:
                 error("unknown type %s in cache file" % type)
 
-class GitConfig:
+class GitConfig(object):
     def __init__(self, args):
         self.parseArgs(args)
         self.maxdiffsize *= 1024 # KBytes to bytes.
@@ -197,7 +197,7 @@ class GitConfig:
         cfg = git(["config hooks.%s" % key])
         return cfg[0] if cfg else default
 
-class Colorer:
+class Colorer(object):
     '''
     Simple class that uses Pygments library to provide colorized
     output (full HTML) for diffs.
@@ -216,7 +216,7 @@ class Colorer:
                 self.result = data
         return self.result
 
-class PrettyHTML:
+class PrettyHTML(object):
     '''
     Simple class to make 'git show' message look prettier
     '''
@@ -242,7 +242,7 @@ class PrettyHTML:
         for keyword in self.keywords:
             line_orig = line
             line = self.make_bold(keyword, line)
-            if line <> line_orig:
+            if line != line_orig:
                 replacements += 1
         # No replacements were made, assume we have commit message
         if replacements == 0:
@@ -482,7 +482,7 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
 
         size = os.path.getsize(tname)
         if size > Config.maxdiffsize:
-            footer = "\nDiff suppressed because of size. To see it, use:\n\n    git %s" % diff_cmd
+            footer = "\nDiff suppressed because of size.\n To see it, use:\n\n    git %s" % diff_cmd
             tname = None
 
     text += Separator
@@ -511,7 +511,7 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
             text += line
 
     # HTML only, read and parse diff
-    if Config.colordiff:
+    if Config.colordiff and tname:
         colorer = Colorer()
         _f = open(tname, 'r+b')
         _data = _f.read()
@@ -520,7 +520,7 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
 
     text += footer
     if Config.colordiff:
-        html += "<br>%s" % footer
+        html += "<br>%s" % footer.replace("\n", "<br>\n")
 
     if Config.debug:
         text += "-- "

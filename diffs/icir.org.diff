@@ -32,10 +32,17 @@
 >     ("manual", True, None, "notify for a manually given set of revisions"),
 34a52
 >     ("colordiff", False, False, "colorize diffs using pygments library"),
-44a63
+45c63,64
+< class State:
+---
 > 
+> class State(object):
+112c131
+< class GitConfig:
+---
+> class GitConfig(object):
 180a200,258
-> class Colorer:
+> class Colorer(object):
 >     '''
 >     Simple class that uses Pygments library to provide colorized
 >     output (full HTML) for diffs.
@@ -54,7 +61,7 @@
 >                 self.result = data
 >         return self.result
 > 
-> class PrettyHTML:
+> class PrettyHTML(object):
 >     '''
 >     Simple class to make 'git show' message look prettier
 >     '''
@@ -80,7 +87,7 @@
 >         for keyword in self.keywords:
 >             line_orig = line
 >             line = self.make_bold(keyword, line)
->             if line <> line_orig:
+>             if line != line_orig:
 >                 replacements += 1
 >         # No replacements were made, assume we have commit message
 >         if replacements == 0:
@@ -252,6 +259,10 @@
 >             html += "<br>%s" % mailTag("<b>Link</b>", url)
 366d483
 < 
+368c485
+<             footer = "\nDiff suppressed because of size. To see it, use:\n\n    git %s" % diff_cmd
+---
+>             footer = "\nDiff suppressed because of size.\n To see it, use:\n\n    git %s" % diff_cmd
 371c488,491
 <     print >>out, Separator
 ---
@@ -288,7 +299,7 @@
 <     print >>out, footer
 ---
 >     # HTML only, read and parse diff
->     if Config.colordiff:
+>     if Config.colordiff and tname:
 >         colorer = Colorer()
 >         _f = open(tname, 'r+b')
 >         _data = _f.read()
@@ -297,7 +308,7 @@
 > 
 >     text += footer
 >     if Config.colordiff:
->         html += "<br>%s" % footer
+>         html += "<br>%s" % footer.replace("\n", "<br>\n")
 388,390c526,540
 <         print >>out, "-- "
 <         print >>out, "debug: show_cmd = git %s" % show_cmd
