@@ -25,23 +25,27 @@
 > 
 26a42
 >     ("altsubject", False, False, "enables alternative subject with repository name"),
-33c49,50
+33c49,54
 <     ("manual", True, None, "notifiy for a manually given set of revisions"),
 ---
 >     ("smtpserver", True, 'localhost', "tells SMTP server to use, host only"),
+>     ("smtpport", True, 25, "sets SMTP port for SMTP server"),
+>     ("smtplogin", True, None, "sets login for SMTP AUTH"),
+>     ("smtppassword", True, None, "sets password for SMTP AUTH"),
+>     ("smtpssl", False, False, "enables SSL for SMTP"),
 >     ("manual", True, None, "notify for a manually given set of revisions"),
-34a52
+34a56
 >     ("colordiff", False, False, "colorize diffs using pygments library"),
-45c63,64
+45c67,68
 < class State:
 ---
 > 
 > class State(object):
-112c131
+112c135
 < class GitConfig:
 ---
 > class GitConfig(object):
-180a200,258
+180a204,330
 > class Colorer(object):
 >     '''
 >     Simple class that uses Pygments library to provide colorized
@@ -100,8 +104,76 @@
 >             line = '%s<br><b>%s</b>' % (self.extra_tags, line)
 >         return line
 > 
+> class Mail(object):
+>     '''
+>     Simple class for notifications via SMTP
+>     '''
+>     def __init__(self, smtp_host, smtp_port, smtp_login, smtp_password, smtp_usessl):
+>         self.smtp_host = smtp_host
+>         self.smtp_port = smtp_port
+>         self.smtp_login = smtp_login
+>         self.smtp_password = smtp_password
+>         self.smtp_usessl = smtp_usessl
+>         # Create message container - the correct MIME type is multipart/alternative.
+>         self.msg = MIMEMultipart('alternative')
 > 
-261,265c339
+> 
+>     def addHeader(self, header,value):
+>         # Set message headers
+>         self.msg[header] = value
+> 
+>     def addPart(self, content_type, content, encoding=None):
+>         if encoding:
+>             # Use specified encoding
+>             part = MIMEText(content, content_type, encoding)
+>         else:
+>             # Fallback to us-ascii
+>             part = MIMEText(content, content_type)
+>         return part
+> 
+>     def attach(self, part):
+>         self.msg.attach(part)
+> 
+>     def attachHtml(self, content):
+>         part = self.addPart('html', content, 'utf8')
+>         self.attach(part)
+> 
+>     def attachText(self, content):
+>         part = self.addPart('plain', content)
+>         self.attach(part)
+> 
+>     def getMessage(self):
+>         # Return whole message (so far)
+>         return self.msg
+> 
+>     def send(self, smtp_sender, smtp_mailinglist, smtp_data):
+>         log("Sending email to %s" % smtp_mailinglist)
+>         self.connection = smtplib.SMTP(self.smtp_host)
+>         try:
+>             # identify ourselves, prompting server for supported features
+>             self.connection.ehlo()
+> 
+>             # Encrypt connection if both server supports it and self.smtp_usessl is True
+>             if self.connection.has_extn('STARTTLS') and self.smtp_usessl:
+>                 self.connection.starttls()
+>                 self.connection.ehlo() # re-identify ourselves over TLS connection
+> 
+>             # Enable SMTP AUTH if both self.smtp_login and self.smtp_password are not empty.
+>             if self.smtp_login and self.smtp_password:
+>                 self.connection.login(self.smtp_login, self.smtp_password)
+> 
+>             # Send message
+>             self.connection.sendmail(smtp_sender, smtp_mailinglist, smtp_data)
+>         except:
+>              # Status of message: delivery failed
+>              return False
+>         finally:
+>             self.connection.quit()
+>         # Status of message: delivery successful
+>         return True
+> 
+> 
+261,265c411
 < def mailTag(key, value):
 <     return "%-11s: %s" % (key, value)
 < 
@@ -109,15 +181,15 @@
 < 
 ---
 > def _getRepo():
-267d340
+267d412
 < 
-269d341
+269d413
 < 
-276d347
+276d419
 < 
-278a350
+278a422
 >     return repo
-280,290c352,353
+280,293c424,425
 <     (out, fname) = makeTmp()
 < 
 <     replyto = "Reply-To: %s\n" % Config.replyto if Config.replyto else ""
@@ -129,12 +201,14 @@
 < X-Mailer: %s %s
 < 
 < %s
+< 
+< """ % (Config.sender, Config.mailinglist, Config.emailprefix, subject, replyto, repo,
+<        Name, VERSION, mailTag("Repository", repo)),
 ---
 > def mailTag(key, value):
 >     return "%-11s: %s" % (key, value)
-292,293c355,370
-< """ % (Config.sender, Config.mailinglist, Config.emailprefix, subject, replyto, repo,
-<        Name, VERSION, mailTag("Repository", repo)),
+295c427,440
+<     return (out, fname)
 ---
 > def generateMailHeader(subject):
 >     repo = _getRepo()
@@ -143,23 +217,16 @@
 >     if Config.altsubject:
 >         subject = ('Repository: %s Branch: %s ' % (re_sub('ssh://(.+)/', '',repo), subject))
 > 
->     # Create message container - the correct MIME type is multipart/alternative.
->     msg = MIMEMultipart('alternative')
 >     # Set message headers
->     msg['From'] = Config.sender
->     msg['To'] = Config.mailinglist
->     msg['Subject'] = Config.emailprefix + subject
->     msg['Reply-To'] = replyto
->     msg['X-Git-Repository'] = repo
->     msg['X-Mailer'] = Name + ' ' + VERSION
-295c372,373
-<     return (out, fname)
----
->     # Return the message object
->     return msg
-299d376
+>     mail.addHeader('From', Config.sender)
+>     mail.addHeader('To', Config.mailinglist)
+>     mail.addHeader('Subject', Config.emailprefix + subject)
+>     mail.addHeader('Reply-To', replyto)
+>     mail.addHeader('X-Git-Repository', repo)
+>     mail.addHeader('X-Mailer', Name + ' ' + VERSION)
+299d443
 < 
-305,308c382,387
+305,308c449,452
 <         stdin = subprocess.Popen("/usr/sbin/sendmail -t", shell=True, stdin=subprocess.PIPE).stdin
 <         for line in open(fname):
 <             print >>stdin, line,
@@ -168,25 +235,23 @@
 >         _f = open(fname, 'r+b')
 >         _data = _f.read()
 >         _f.close()
->         s = smtplib.SMTP(Config.smtpserver)
->         s.sendmail(Config.sender, Config.mailinglist, _data)
->         s.quit()
-310,314d388
+>         mail.send(Config.sender, Config.mailinglist, _data)
+310,314d453
 <     # Wait a bit in case we're going to send more mails. Otherwise, the mails
 <     # get sent back-to-back and are likely to end up with identical timestamps,
 <     # which may then make them appear to have arrived in the wrong order.
 <     if not Config.debug:
 <         time.sleep(2)
-317a392,394
+317a457,459
 >     # Start with reasonable defaults.
 >     text      = ""
 >     html      = "<html>\n"
-319c396,397
+319c461,462
 <     (out, fname) = generateMailHeader("%s '%s' created" % (key, value))
 ---
 >     (out, fname) = makeTmp()
->     msg = generateMailHeader("%s '%s' created" % (key, value))
-321,322c399,410
+>     generateMailHeader("%s '%s' created" % (key, value))
+321,322c464,472
 <     print >>out, mailTag("New %s" % key, value)
 <     print >>out, mailTag("Referencing", rev)
 ---
@@ -196,22 +261,19 @@
 >         html += mailTag("<b>New</b> %s" % key, value)
 >         html += mailTag("<b>Referencing</b>", rev)
 > 
->     # Record the MIME types of both parts - text/plain and text/html.
->     part1 = MIMEText(text, 'plain')
->     msg.attach(part1)
+>     mail.attachText(text)
 >     if Config.colordiff:
->         part2 = MIMEText(html, 'html')
->         msg.attach(part2)
-323a412,413
+>         mail.attachHtml(html)
+323a474,475
 >     # print whole message to file
->     print >>out, msg
-327a418,422
+>     print >>out, mail.getMessage()
+327a480,484
 >     # Start with reasonable defaults.
 >     text      = ""
 >     html      = "<html>\n"
 >     (out, fname) = makeTmp()
->     msg = generateMailHeader("%s '%s' deleted" % (key, value))
-329,331c424,433
+>     generateMailHeader("%s '%s' deleted" % (key, value))
+329,331c486,492
 <     (out, fname) = generateMailHeader("%s '%s' deleted" % (key, value))
 < 
 <     print >>out, mailTag("Deleted %s" % key, value)
@@ -220,16 +282,13 @@
 >     if Config.colordiff:
 >         html += mailTag("<b>Deleted</b> %s" % key, value)
 > 
->     # Record the MIME types of both parts - text/plain and text/html.
->     part1 = MIMEText(text, 'plain')
->     msg.attach(part1)
+>     mail.attachText(text)
 >     if Config.colordiff:
->         part2 = MIMEText(html, 'html')
->         msg.attach(part2)
-332a435,436
+>         mail.attachHtml(html)
+332a494,495
 >     # print whole message to file
->     print >>out, msg
-338,339c442,453
+>     print >>out, mail.getMessage()
+338,339c501,512
 < 
 <     (out, fname) = generateMailHeader(subject)
 ---
@@ -239,45 +298,45 @@
 >     repo = _getRepo()
 >     # The 'git show' prettifier
 >     prettyhtml = PrettyHTML()
->     msg = generateMailHeader(subject)
+>     generateMailHeader(subject)
 >     (out, fname) = makeTmp()
 >     #
 >     text += mailTag("Repository", repo) + "\n"
 >     if Config.colordiff:
 >         html += "<br>%s" % mailTag("<b>Repository</b>", repo)
-344c458,460
+344c517,519
 <     print >>out, mailTag("On branch%s" % multi, heads)
 ---
 >     text += mailTag("On branch%s" % multi, heads)
 >     if Config.colordiff:
 >         html +="<br>%s" % mailTag("<b>On branch</b>%s" % multi, heads)
-348c464,466
+348c523,525
 <         print >>out, mailTag("Link", url)
 ---
 >         text += mailTag("Link", url)
 >         if Config.colordiff:
 >             html += "<br>%s" % mailTag("<b>Link</b>", url)
-366d483
+366d542
 < 
-368c485
+368c544
 <             footer = "\nDiff suppressed because of size. To see it, use:\n\n    git %s" % diff_cmd
 ---
 >             footer = "\nDiff suppressed because of size.\n To see it, use:\n\n    git %s" % diff_cmd
-371c488,491
+371c547,550
 <     print >>out, Separator
 ---
 >     text += Separator
 >     if Config.colordiff:
 >         # Use nice <hr> in html mode
 >         html += "<br>%s\n" % Separhtml
-375c495,498
+375c554,557
 <             print >>out, Separator
 ---
 >             text += Separator
 >             if Config.colordiff:
 >                 # Use nice <hr> in html mode
 >                 html += "<br>%s\n" % Separhtml
-377,379c500,506
+377,379c559,565
 <             print >>out, line
 < 
 <     print >>out, Separator
@@ -289,13 +348,13 @@
 >     text += Separator
 >     if Config.colordiff:
 >         html += "<br>%s\n" % Separhtml
-380a508
+380a567
 >     # Text only, read diff from file
-383c511
+383c570
 <             print >>out, line,
 ---
 >             text += line
-385c513,523
+385c572,582
 <     print >>out, footer
 ---
 >     # HTML only, read and parse diff
@@ -309,7 +368,7 @@
 >     text += footer
 >     if Config.colordiff:
 >         html += "<br>%s" % footer.replace("\n", "<br>\n")
-388,390c526,540
+388,390c585,596
 <         print >>out, "-- "
 <         print >>out, "debug: show_cmd = git %s" % show_cmd
 <         print >>out, "debug: diff_cmd = git %s" % diff_cmd
@@ -323,25 +382,22 @@
 >             html += "<br>debug: show_cmd = git %s" % show_cmd
 >             html += "<br>debug: diff_cmd = git %s" % diff_cmd
 > 
->     # Record the MIME types of both parts - text/plain and text/html.
->     part1 = MIMEText(text, 'plain')
->     msg.attach(part1)
+>     mail.attachText(text)
 >     if Config.colordiff:
->         part2 = MIMEText(html, 'html')
->         msg.attach(part2)
-391a542,543
+>         mail.attachHtml(html)
+391a598,599
 >     # print whole message to file
->     print >>out, msg
-469a622,625
+>     print >>out, mail.getMessage()
+469a678,681
 >     # Start with reasonable defaults.
 >     text      = ""
 >     html      = "<html>\n"
 >     (out, fname) = makeTmp()
-473c629
+473c685
 <     (out, fname) = generateMailHeader("%s's head updated: %s" % (head, subject[0]))
 ---
->     mgs = generateMailHeader("%s's head updated: %s" % (head, subject[0]))
-475,476c631,635
+>     generateMailHeader("%s's head updated: %s" % (head, subject[0]))
+475,476c687,691
 <     print >>out, "Branch '%s' now includes:" % head
 <     print >>out, ""
 ---
@@ -350,20 +406,21 @@
 >     if Config.colordiff:
 >         html += "<br><b>Branch</b> '%s' now includes:" % head
 >         html += "<br>"
-479c638,648
+479c694,697
 <         print >>out, "    ", git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0]
 ---
 >         text += "    " + str(git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0])
 >         if Config.colordiff:
 >             html += "<br>" % str(git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0])
 > 
-> 
->     # Record the MIME types of both parts - text/plain and text/html.
->     part1 = MIMEText(text, 'plain')
->     msg.attach(part1)
+480a699,704
+>     mail.attachText(text)
 >     if Config.colordiff:
->         part2 = MIMEText(html, 'html')
->         msg.attach(part2)
-480a650,651
+>         mail.attachHtml(html)
+> 
 >     # print whole message to file
->     print >>out, msg
+>     print >>out, mail.getMessage()
+483a708,710
+> 
+> mail = Mail(Config.smtpserver, Config.smtpport,
+>             Config.smtplogin, Config.smtppassword, Config.smtpssl)

@@ -47,6 +47,10 @@ Options = [
     ("log", True, "%s.log" % Name, "set log output"),
     ("mailinglist", True, whoami, "destination address for mails"),
     ("smtpserver", True, 'localhost', "tells SMTP server to use, host only"),
+    ("smtpport", True, 25, "sets SMTP port for SMTP server"),
+    ("smtplogin", True, None, "sets login for SMTP AUTH"),
+    ("smtppassword", True, None, "sets password for SMTP AUTH"),
+    ("smtpssl", False, False, "enables SSL for SMTP"),
     ("manual", True, None, "notify for a manually given set of revisions"),
     ("maxdiffsize", True, 50, "limit the size of diffs in mails (KB)"),
     ("colordiff", False, False, "colorize diffs using pygments library"),
@@ -255,6 +259,74 @@ class PrettyHTML(object):
             line = '%s<br><b>%s</b>' % (self.extra_tags, line)
         return line
 
+class Mail(object):
+    '''
+    Simple class for notifications via SMTP
+    '''
+    def __init__(self, smtp_host, smtp_port, smtp_login, smtp_password, smtp_usessl):
+        self.smtp_host = smtp_host
+        self.smtp_port = smtp_port
+        self.smtp_login = smtp_login
+        self.smtp_password = smtp_password
+        self.smtp_usessl = smtp_usessl
+        # Create message container - the correct MIME type is multipart/alternative.
+        self.msg = MIMEMultipart('alternative')
+
+
+    def addHeader(self, header,value):
+        # Set message headers
+        self.msg[header] = value
+
+    def addPart(self, content_type, content, encoding=None):
+        if encoding:
+            # Use specified encoding
+            part = MIMEText(content, content_type, encoding)
+        else:
+            # Fallback to us-ascii
+            part = MIMEText(content, content_type)
+        return part
+
+    def attach(self, part):
+        self.msg.attach(part)
+
+    def attachHtml(self, content):
+        part = self.addPart('html', content, 'utf8')
+        self.attach(part)
+
+    def attachText(self, content):
+        part = self.addPart('plain', content)
+        self.attach(part)
+
+    def getMessage(self):
+        # Return whole message (so far)
+        return self.msg
+
+    def send(self, smtp_sender, smtp_mailinglist, smtp_data):
+        log("Sending email to %s" % smtp_mailinglist)
+        self.connection = smtplib.SMTP(self.smtp_host)
+        try:
+            # identify ourselves, prompting server for supported features
+            self.connection.ehlo()
+
+            # Encrypt connection if both server supports it and self.smtp_usessl is True
+            if self.connection.has_extn('STARTTLS') and self.smtp_usessl:
+                self.connection.starttls()
+                self.connection.ehlo() # re-identify ourselves over TLS connection
+
+            # Enable SMTP AUTH if both self.smtp_login and self.smtp_password are not empty.
+            if self.smtp_login and self.smtp_password:
+                self.connection.login(self.smtp_login, self.smtp_password)
+
+            # Send message
+            self.connection.sendmail(smtp_sender, smtp_mailinglist, smtp_data)
+        except:
+             # Status of message: delivery failed
+             return False
+        finally:
+            self.connection.quit()
+        # Status of message: delivery successful
+        return True
+
 
 def log(msg):
     print >>Config.log, "%s - %s" % (time.asctime(), msg)
@@ -359,18 +431,13 @@ def generateMailHeader(subject):
     if Config.altsubject:
         subject = ('Repository: %s Branch: %s ' % (re_sub('ssh://(.+)/', '',repo), subject))
 
-    # Create message container - the correct MIME type is multipart/alternative.
-    msg = MIMEMultipart('alternative')
     # Set message headers
-    msg['From'] = Config.sender
-    msg['To'] = Config.mailinglist
-    msg['Subject'] = Config.emailprefix + subject
-    msg['Reply-To'] = replyto
-    msg['X-Git-Repository'] = repo
-    msg['X-Mailer'] = Name + ' ' + VERSION
-
-    # Return the message object
-    return msg
+    mail.addHeader('From', Config.sender)
+    mail.addHeader('To', Config.mailinglist)
+    mail.addHeader('Subject', Config.emailprefix + subject)
+    mail.addHeader('Reply-To', replyto)
+    mail.addHeader('X-Git-Repository', repo)
+    mail.addHeader('X-Mailer', Name + ' ' + VERSION)
 
 def sendMail(out, fname):
     out.close()
@@ -382,9 +449,7 @@ def sendMail(out, fname):
         _f = open(fname, 'r+b')
         _data = _f.read()
         _f.close()
-        s = smtplib.SMTP(Config.smtpserver)
-        s.sendmail(Config.sender, Config.mailinglist, _data)
-        s.quit()
+        mail.send(Config.sender, Config.mailinglist, _data)
 
 
 def entryAdded(key, value, rev):
@@ -394,7 +459,7 @@ def entryAdded(key, value, rev):
     html      = "<html>\n"
 
     (out, fname) = makeTmp()
-    msg = generateMailHeader("%s '%s' created" % (key, value))
+    generateMailHeader("%s '%s' created" % (key, value))
 
     text += mailTag("New %s" % key, value)
     text += mailTag("Referencing", rev)
@@ -402,15 +467,12 @@ def entryAdded(key, value, rev):
         html += mailTag("<b>New</b> %s" % key, value)
         html += mailTag("<b>Referencing</b>", rev)
 
-    # Record the MIME types of both parts - text/plain and text/html.
-    part1 = MIMEText(text, 'plain')
-    msg.attach(part1)
+    mail.attachText(text)
     if Config.colordiff:
-        part2 = MIMEText(html, 'html')
-        msg.attach(part2)
+        mail.attachHtml(html)
 
     # print whole message to file
-    print >>out, msg
+    print >>out, mail.getMessage()
     sendMail(out, fname)
 
 def entryDeleted(key, value):
@@ -419,21 +481,18 @@ def entryDeleted(key, value):
     text      = ""
     html      = "<html>\n"
     (out, fname) = makeTmp()
-    msg = generateMailHeader("%s '%s' deleted" % (key, value))
+    generateMailHeader("%s '%s' deleted" % (key, value))
 
     text += mailTag("Deleted %s" % key, value)
     if Config.colordiff:
         html += mailTag("<b>Deleted</b> %s" % key, value)
 
-    # Record the MIME types of both parts - text/plain and text/html.
-    part1 = MIMEText(text, 'plain')
-    msg.attach(part1)
+    mail.attachText(text)
     if Config.colordiff:
-        part2 = MIMEText(html, 'html')
-        msg.attach(part2)
+        mail.attachHtml(html)
 
     # print whole message to file
-    print >>out, msg
+    print >>out, mail.getMessage()
     sendMail(out, fname)
 
 # Sends a mail for a notification consistent of two parts: (1) the output of a
@@ -445,7 +504,7 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
     repo = _getRepo()
     # The 'git show' prettifier
     prettyhtml = PrettyHTML()
-    msg = generateMailHeader(subject)
+    generateMailHeader(subject)
     (out, fname) = makeTmp()
     #
     text += mailTag("Repository", repo) + "\n"
@@ -532,15 +591,12 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
             html += "<br>debug: show_cmd = git %s" % show_cmd
             html += "<br>debug: diff_cmd = git %s" % diff_cmd
 
-    # Record the MIME types of both parts - text/plain and text/html.
-    part1 = MIMEText(text, 'plain')
-    msg.attach(part1)
+    mail.attachText(text)
     if Config.colordiff:
-        part2 = MIMEText(html, 'html')
-        msg.attach(part2)
+        mail.attachHtml(html)
 
     # print whole message to file
-    print >>out, msg
+    print >>out, mail.getMessage()
     sendMail(out, fname)
 
 # Sends notification for a specific revision.
@@ -626,7 +682,7 @@ def headMoved(head, path):
 
     subject = git("show '--pretty=format:%%s (%%h)' -s %s" % path[-1])
 
-    mgs = generateMailHeader("%s's head updated: %s" % (head, subject[0]))
+    generateMailHeader("%s's head updated: %s" % (head, subject[0]))
 
     text += "Branch '%s' now includes:" % head
     text += ""
@@ -640,18 +696,18 @@ def headMoved(head, path):
             html += "<br>" % str(git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0])
 
 
-    # Record the MIME types of both parts - text/plain and text/html.
-    part1 = MIMEText(text, 'plain')
-    msg.attach(part1)
+    mail.attachText(text)
     if Config.colordiff:
-        part2 = MIMEText(html, 'html')
-        msg.attach(part2)
+        mail.attachHtml(html)
 
     # print whole message to file
-    print >>out, msg
+    print >>out, mail.getMessage()
     sendMail(out, fname)
 
 Config = GitConfig(sys.argv[1:])
+
+mail = Mail(Config.smtpserver, Config.smtpport,
+            Config.smtplogin, Config.smtppassword, Config.smtpssl)
 
 log("Running for %s" % os.getcwd())
 

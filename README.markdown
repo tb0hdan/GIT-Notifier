@@ -18,6 +18,11 @@ Main differences:
 
 - _Sample: http://tb0hdan.github.com/GIT-Notifier/sample.html
 
+
+## Hooks
+
+See hooks/ directory
+
 ## Authorship
 
 Created by Robin Sommer

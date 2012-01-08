@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# Send notifications via Gmail.
+/etc/scripts/git-notifier --altsubject --colordiff --maxdiffsize=1024 --smtpserver=smtp.gmail.com --smtpport=587 --smtplogin=yourlogin@gmail.com --smtppassword=yourpassword --smtpssl --sender=git@yourcompany.com --mailinglist=developers@yourcompany.com
+
+
+
+
+
+
+
+
+
+
+
