@@ -19,7 +19,7 @@ try:
     from pygments.lexers import DiffLexer
     from pygments.formatters import HtmlFormatter
     pygments_available = True
-except:
+except ImportError:
     pygments_available = False
 
 VERSION   = "0.3-16"  # Filled in automatically.
@@ -38,12 +38,15 @@ sender = os.environ["GL_USER"] if gitolite else whoami
 
 Options = [
     # Name, argument, default, help,
-    ("allchanges", True, set(), "branches for which *all* changes are to be reported"),
-    ("altsubject", False, False, "enables alternative subject with repository name"),
+    ("allchanges", True, set(),
+     "branches for which *all* changes are to be reported"),
+    ("altsubject", False, False,
+     "enables alternative subject with repository name"),
     ("debug", False, False, "enable debug output"),
     ("diff", True, None, "mail out diffs between two revisions"),
     ("emailprefix", True, "[git]", "Subject prefix for mails"),
-    ("hostname", True, socket.gethostname(), "host where the repository is hosted"),
+    ("hostname", True, socket.gethostname(),
+     "host where the repository is hosted"),
     ("log", True, "%s.log" % Name, "set log output"),
     ("mailinglist", True, whoami, "destination address for mails"),
     ("smtpserver", True, 'localhost', "tells SMTP server to use, host only"),
@@ -57,19 +60,27 @@ Options = [
     ("noupdate", False, False, "do not update the state file"),
     ("repouri", True, None, "full URI for the repository"),
     ("sender", True, sender, "sender address for mails"),
-    ("link", True, None, "Link to insert into mail, %s will be replaced with revision"),
+    ("link", True, None,
+     "Link to insert into mail, %s will be replaced with revision"),
     ("updateonly", False, False, "update state file only, no mails"),
     ("users", True, None, "location of a user-to-email mapping file"),
     ("replyto", True, None, "email address for reply-to header"),
-    ("mergediffs", True, set(), "branches for which complete merge diffs are to be included"),
+    ("mergediffs", True, set(),
+     "branches for which complete merge diffs are to be included"),
     ]
 
 
 class State(object):
+    '''
+    State class
+    '''
     def __init__(self):
         self.clear()
 
     def clear(self):
+        '''
+        Clear data structures
+        '''
         self.heads = {}
         self.tags = {}
         self.revs = set()
@@ -78,6 +89,9 @@ class State(object):
         self.reported = set() # Revs reported this run so far.
 
     def writeTo(self, file):
+        '''
+        Write to cache file
+        '''
         if os.path.exists(CacheFile):
             try:
                 shutil.move(CacheFile, CacheFile + ".bak")
@@ -101,6 +115,9 @@ class State(object):
         #     print >>out, "diff", rev
 
     def readFrom(self, file):
+        '''
+        Read from cache file
+        '''
         self.clear()
 
         for line in open(file):
@@ -133,15 +150,20 @@ class State(object):
                 error("unknown type %s in cache file" % type)
 
 class GitConfig(object):
+    '''
+    GitConfig class
+    '''
     def __init__(self, args):
         self.parseArgs(args)
         self.maxdiffsize *= 1024 # KBytes to bytes.
 
         if self.allchanges and not isinstance(self.allchanges, set):
-            self.allchanges = set([head.strip() for head in self.allchanges.split(",")])
+            self.allchanges = \
+                set([head.strip() for head in self.allchanges.split(",")])
 
         if self.mergediffs and not isinstance(self.mergediffs, set):
-            self.mergediffs = set([head.strip() for head in self.mergediffs.split(",")])
+            self.mergediffs = \
+                set([head.strip() for head in self.mergediffs.split(",")])
 
         if not self.debug:
             self.log = open(self.log, "a")
@@ -156,7 +178,9 @@ class GitConfig(object):
         self.readUsers()
 
     def parseArgs(self, args):
-
+        '''
+        Parse command line arguments
+        '''
         parser = optparse.OptionParser(version=VERSION)
 
         for (name, arg, default, help) in Options:
@@ -170,11 +194,13 @@ class GitConfig(object):
 
             if not arg:
                 action = "store_true" if not default else "store_false"
-                parser.add_option("--%s" % name, action=action, dest=name, default=defval, help=help)
+                parser.add_option("--%s" % name, action=action, dest=name,
+                    default=defval, help=help)
 
             else:
                 type = "string" if not isinstance(default, int) else "int"
-                parser.add_option("--%s" % name, action="store", type=type, default=defval, dest=name, help=help)
+                parser.add_option("--%s" % name, action="store", type=type,
+                    default=defval, dest=name, help=help)
 
         (options, args) = parser.parse_args(args)
 
@@ -185,6 +211,9 @@ class GitConfig(object):
             self.__dict__[name] = options.__dict__[name]
 
     def readUsers(self):
+        '''
+        Read users from configuration file
+        '''
         if self.users and os.path.exists(self.users):
             for line in open(self.users):
                 line = line.strip()
@@ -198,6 +227,9 @@ class GitConfig(object):
                     break
 
     def _git_config(self, key, default):
+        '''
+        Return git configuration
+        '''
         cfg = git(["config hooks.%s" % key])
         return cfg[0] if cfg else default
 
@@ -211,14 +243,30 @@ class Colorer(object):
             self.formatter = HtmlFormatter(linenos=True, full=True)
             self.lexerobj  = DiffLexer()
 
-    def format_diff(self,data=None):
+    def formatDiff(self,data=None):
+        '''
+        Format diff
+        '''
         self.data = data
         if self.data:
             try:
-                self.result = highlight(self.data, self.lexerobj, self.formatter)
+                self.result = highlight(self.data, self.lexerobj,
+                    self.formatter)
             except:
                 self.result = data
         return self.result
+
+    def colorizeFile(self, fname=None):
+        '''
+        Colorizes input file. Result is HTML.
+        '''
+        if fname and os.path.exists(fname):
+            _f = open(fname, 'r+b')
+            _data = _f.read()
+            _f.close()
+            return self.formatDiff(_data)
+        else:
+            return None
 
 class PrettyHTML(object):
     '''
@@ -232,7 +280,11 @@ class PrettyHTML(object):
         self.extra_tags = ''
 
     def make_bold(self, keyword, line):
-        if (re_search(keyword, line) != None) and (self.keywords_trigger == False):
+        '''
+        Makes text bold
+        '''
+        if (re_search(keyword, line) != None) and \
+            (self.keywords_trigger == False):
             if re_search(':', keyword) == None:
                 replacement = '%s:' % keyword
             else:
@@ -242,6 +294,9 @@ class PrettyHTML(object):
         return line
 
     def convert(self, line):
+        '''
+        Convert 'git show' keywords
+        '''
         replacements = 0
         for keyword in self.keywords:
             line_orig = line
@@ -259,25 +314,42 @@ class PrettyHTML(object):
             line = '%s<br><b>%s</b>' % (self.extra_tags, line)
         return line
 
+
 class Mail(object):
     '''
     Simple class for notifications via SMTP
     '''
-    def __init__(self, smtp_host, smtp_port, smtp_login, smtp_password, smtp_usessl):
+    def __init__(self, smtp_host, smtp_port, smtp_login,
+        smtp_password, smtp_usessl):
+
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
         self.smtp_login = smtp_login
         self.smtp_password = smtp_password
         self.smtp_usessl = smtp_usessl
-        # Create message container - the correct MIME type is multipart/alternative.
+        # Create message container
+        # The correct MIME type is multipart/alternative.
         self.msg = MIMEMultipart('alternative')
 
 
-    def addHeader(self, header,value):
-        # Set message headers
+    def addHeader(self, header, value, header_append=False):
+        '''
+        Adds message header
+        '''
+        # Verify presence of header
+        if self.msg[header]:
+            # Header already set, look out for recepient duplicates!
+            if not header_append:
+                return False
+            del self.msg[header]
+        # Set message header
         self.msg[header] = value
+        return True
 
     def addPart(self, content_type, content, encoding=None):
+        '''
+        Adds message part
+        '''
         if encoding:
             # Use specified encoding
             part = MIMEText(content, content_type, encoding)
@@ -287,45 +359,160 @@ class Mail(object):
         return part
 
     def attach(self, part):
+        '''
+        Attach message part
+        '''
         self.msg.attach(part)
 
     def attachHtml(self, content):
+        '''
+        Attach HTML message
+        '''
         part = self.addPart('html', content, 'utf8')
         self.attach(part)
 
     def attachText(self, content):
+        '''
+        Attach text message
+        '''
         part = self.addPart('plain', content)
         self.attach(part)
 
     def getMessage(self):
-        # Return whole message (so far)
+        '''
+        Return whole message (so far)
+        '''
         return self.msg
 
     def send(self, smtp_sender, smtp_mailinglist, smtp_data):
+        '''
+        Send email via SMTP
+        '''
         log("Sending email to %s" % smtp_mailinglist)
         self.connection = smtplib.SMTP(self.smtp_host)
         try:
             # identify ourselves, prompting server for supported features
             self.connection.ehlo()
 
-            # Encrypt connection if both server supports it and self.smtp_usessl is True
+            # Encrypt connection if both server supports it
+            # and self.smtp_usessl is True
             if self.connection.has_extn('STARTTLS') and self.smtp_usessl:
                 self.connection.starttls()
-                self.connection.ehlo() # re-identify ourselves over TLS connection
+                # re-identify ourselves over TLS connection
+                self.connection.ehlo()
 
-            # Enable SMTP AUTH if both self.smtp_login and self.smtp_password are not empty.
+            # Enable SMTP AUTH if both self.smtp_login and
+            # self.smtp_password are not empty.
             if self.smtp_login and self.smtp_password:
                 self.connection.login(self.smtp_login, self.smtp_password)
 
             # Send message
             self.connection.sendmail(smtp_sender, smtp_mailinglist, smtp_data)
         except:
-             # Status of message: delivery failed
-             return False
+            # Status of message: delivery failed
+            return False
         finally:
             self.connection.quit()
         # Status of message: delivery successful
         return True
+
+class MailWrapper(object):
+    '''
+    MailWrapper class provides high level interface to Mail class
+    '''
+    def __init__(self, mail_object):
+        self.mail = mail_object
+        self.text_message = ''
+        self.html_message = '<html>\n'
+
+    def init(self, text='', html='<html>\n'):
+        '''
+        Start with reasonable defaults.
+        '''
+        self.text_message = text
+        self.html_message = html
+
+    def sendFile(self, out, fname):
+        '''
+        Send file contents via SMTP
+        '''
+        out.close()
+        if Config.debug:
+            for line in open(fname):
+                print "    |", line,
+            print ""
+        else:
+            _f = open(fname, 'r+b')
+            _data = _f.read()
+            _f.close()
+            self.mail.send(Config.sender, Config.mailinglist, _data)
+
+    def generateMailHeader(self, subject):
+        '''
+        Generates mail header
+        '''
+        # TODO: This function should be called only once during run.
+        repo = _getRepo()
+        # Reply-To equals to sender, if not set.
+        replyto = 'Reply-To: %s\n' % \
+            Config.replyto if Config.replyto else Config.sender
+        if Config.altsubject:
+            subject = ('Repository: %s Branch: %s ' % \
+                (re_sub('ssh://(.+)/', '',repo), subject))
+
+        # Set message headers
+        self.mail.addHeader('From', Config.sender)
+        self.mail.addHeader('To', Config.mailinglist)
+        # Allow only 'Subject' header replacement.
+        self.mail.addHeader('Subject',
+            Config.emailprefix + subject, header_append=True)
+        self.mail.addHeader('Reply-To', replyto)
+        self.mail.addHeader('X-Git-Repository', repo)
+        self.mail.addHeader('X-Mailer', Name + ' ' + VERSION)
+
+
+    def addTag(self, key, value):
+        '''
+        Adds message tag
+        '''
+        if Config.colordiff:
+            formatted = '<br><b>%-11s:</b> %s' % (key, value)
+            self.addLine(formatted, html_only=True, start_br=False)
+        else:
+            formatted = '%-11s: %s' % (key, value)
+            self.addLine(formatted, text_only=True)
+
+    def addLine(self, line, text_only=False, html_only=False, start_br=True):
+        '''
+        Adds message line
+        '''
+        if text_only:
+            self.text_message += line
+            return
+        if html_only:
+            if Config.colordiff:
+                if start_br:
+                    self.html_message += '<br>%s' % line
+                else:
+                    self.html_message += line
+            return
+        # TODO: DRY!!!
+        self.text_message += line
+        if Config.colordiff:
+            if start_br:
+                self.html_message += '<br>%s' % line
+            else:
+                self.html_message += line
+
+    def getMessage(self):
+        '''
+        Returns whole message
+        '''
+        # Message parts should be always attached before returning the message.
+        self.mail.attachText(self.text_message)
+        if Config.colordiff:
+            self.mail.attachHtml(self.html_message)
+        return self.mail.getMessage()
 
 
 def log(msg):
@@ -347,7 +534,8 @@ def git(args, stdout_to=subprocess.PIPE, all=False):
         pass
 
     try:
-        child = subprocess.Popen("git " + args, shell=True, stdin=None, stdout=stdout_to, stderr=subprocess.PIPE)
+        child = subprocess.Popen("git " + args, shell=True, stdin=None,
+            stdout=stdout_to, stderr=subprocess.PIPE)
         (stdout, stderr) = child.communicate()
     except OSError, e:
         error("cannot start git: %s" % str(e))
@@ -413,116 +601,67 @@ def _getRepo():
     if not repo:
         if gitolite:
             # Gitolite version.
-            repo = "ssh://%s@%s/%s" % (whoami, Config.hostname, os.path.basename(os.getcwd()))
+            repo = "ssh://%s@%s/%s" % (whoami, Config.hostname,
+                os.path.basename(os.getcwd()))
         else:
             # Standard version.
-            repo = "ssh://%s/%s" % (Config.hostname, os.path.basename(os.getcwd()))
+            repo = "ssh://%s/%s" % (Config.hostname,
+                os.path.basename(os.getcwd()))
         if repo.endswith(".git"):
             repo = repo[0:-4]
     return repo
 
-def mailTag(key, value):
-    return "%-11s: %s" % (key, value)
-
-def generateMailHeader(subject):
-    repo = _getRepo()
-    # Reply-To equals to sender, if not set.
-    replyto = "Reply-To: %s\n" % Config.replyto if Config.replyto else Config.sender
-    if Config.altsubject:
-        subject = ('Repository: %s Branch: %s ' % (re_sub('ssh://(.+)/', '',repo), subject))
-
-    # Set message headers
-    mail.addHeader('From', Config.sender)
-    mail.addHeader('To', Config.mailinglist)
-    mail.addHeader('Subject', Config.emailprefix + subject)
-    mail.addHeader('Reply-To', replyto)
-    mail.addHeader('X-Git-Repository', repo)
-    mail.addHeader('X-Mailer', Name + ' ' + VERSION)
-
-def sendMail(out, fname):
-    out.close()
-    if Config.debug:
-        for line in open(fname):
-            print "    |", line,
-        print ""
-    else:
-        _f = open(fname, 'r+b')
-        _data = _f.read()
-        _f.close()
-        mail.send(Config.sender, Config.mailinglist, _data)
-
 
 def entryAdded(key, value, rev):
     log("New %s %s" % (key, value))
-    # Start with reasonable defaults.
-    text      = ""
-    html      = "<html>\n"
-
     (out, fname) = makeTmp()
-    generateMailHeader("%s '%s' created" % (key, value))
 
-    text += mailTag("New %s" % key, value)
-    text += mailTag("Referencing", rev)
-    if Config.colordiff:
-        html += mailTag("<b>New</b> %s" % key, value)
-        html += mailTag("<b>Referencing</b>", rev)
+    # Start with empty message
+    message.init()
+    message.generateMailHeader("%s '%s' created" % (key, value))
 
-    mail.attachText(text)
-    if Config.colordiff:
-        mail.attachHtml(html)
+    message.addTag("New %s" % key, value)
+    message.addTag("Referencing", rev)
 
     # print whole message to file
-    print >>out, mail.getMessage()
-    sendMail(out, fname)
+    print >>out, message.getMessage()
+    message.sendFile(out, fname)
 
 def entryDeleted(key, value):
     log("Deleted %s %s" % (key, value))
-    # Start with reasonable defaults.
-    text      = ""
-    html      = "<html>\n"
     (out, fname) = makeTmp()
-    generateMailHeader("%s '%s' deleted" % (key, value))
 
-    text += mailTag("Deleted %s" % key, value)
-    if Config.colordiff:
-        html += mailTag("<b>Deleted</b> %s" % key, value)
+    # Start with empty message
+    message.init()
+    message.generateMailHeader("%s '%s' deleted" % (key, value))
 
-    mail.attachText(text)
-    if Config.colordiff:
-        mail.attachHtml(html)
+    message.addTag("Deleted %s" % key, value)
 
     # print whole message to file
-    print >>out, mail.getMessage()
-    sendMail(out, fname)
+    print >>out, message.getMessage()
+    message.sendFile(out, fname)
 
 # Sends a mail for a notification consistent of two parts: (1) the output of a
 # show command, and (2) the output of a diff command.
 def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
-    # Start with reasonable defaults.
-    text      = ""
-    html      = "<html>\n"
     repo = _getRepo()
     # The 'git show' prettifier
     prettyhtml = PrettyHTML()
-    generateMailHeader(subject)
+    # Start with empty message
+    message.init()
+    message.generateMailHeader(subject)
     (out, fname) = makeTmp()
     #
-    text += mailTag("Repository", repo) + "\n"
-    if Config.colordiff:
-        html += "<br>%s" % mailTag("<b>Repository</b>", repo)
+    message.addTag("Repository", repo)
 
     multi = "es" if len(heads) > 1 else ""
     heads = ",".join(heads)
 
-    text += mailTag("On branch%s" % multi, heads)
-    if Config.colordiff:
-        html +="<br>%s" % mailTag("<b>On branch</b>%s" % multi, heads)
+    message.addTag("On branch%s" % multi, heads)
 
     if Config.link:
         url = Config.link.replace("%s", rev)
-        text += mailTag("Link", url)
-        if Config.colordiff:
-            html += "<br>%s" % mailTag("<b>Link</b>", url)
+        message.addTag("Link", url)
 
     footer = ""
     show = git(show_cmd)
@@ -541,69 +680,58 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
 
         size = os.path.getsize(tname)
         if size > Config.maxdiffsize:
-            footer = "\nDiff suppressed because of size.\n To see it, use:\n\n    git %s" % diff_cmd
+            footer = "\nDiff suppressed because of size.\n \
+                To see it, use:\n\n    git %s" % diff_cmd
             tname = None
 
-    text += Separator
-    if Config.colordiff:
-        # Use nice <hr> in html mode
-        html += "<br>%s\n" % Separhtml
+    message.addLine(Separator, text_only=True)
+    # Use nice <hr> in html mode
+    message.addLine(Separhtml, html_only=True)
 
     for line in git(show_cmd, all=True):
         if line == "---":
-            text += Separator
-            if Config.colordiff:
-                # Use nice <hr> in html mode
-                html += "<br>%s\n" % Separhtml
+            message.addLine(Separator, text_only=True)
+            message.addLine(Separhtml, html_only=True)
         else:
-            text += line + "\n"
-            if Config.colordiff:
-                html += prettyhtml.convert(line)
+            message.addLine(line + "\n", text_only=True)
+            message.addLine(prettyhtml.convert(line),
+                html_only=True, start_br=False)
 
-    text += Separator
-    if Config.colordiff:
-        html += "<br>%s\n" % Separhtml
+    message.addLine(Separator, text_only=True)
+    message.addLine(Separhtml, html_only=True)
 
     # Text only, read diff from file
     if tname:
         for line in open(tname):
-            text += line
+            message.addLine(line, text_only=True)
 
     # HTML only, read and parse diff
     if Config.colordiff and tname:
         colorer = Colorer()
-        _f = open(tname, 'r+b')
-        _data = _f.read()
-        _f.close()
-        html += colorer.format_diff(_data)
+        message.addLine(colorer.colorizeFile(tname),
+            html_only=True, start_br=False)
 
-    text += footer
-    if Config.colordiff:
-        html += "<br>%s" % footer.replace("\n", "<br>\n")
+    message.addLine(footer, text_only=True)
+    message.addLine(footer.replace("\n", "<br>\n"), html_only=True)
 
     if Config.debug:
-        text += "-- "
-        text += "debug: show_cmd = git %s" % show_cmd
-        text += "debug: diff_cmd = git %s" % diff_cmd
-        if Config.colordiff:
-            # Use nice <hr> in html mode
-            html += "<br>%s" % Separhtml
-            html += "<br>debug: show_cmd = git %s" % show_cmd
-            html += "<br>debug: diff_cmd = git %s" % diff_cmd
-
-    mail.attachText(text)
-    if Config.colordiff:
-        mail.attachHtml(html)
+        message.addLine("-- ", text_only=True)
+        # Use nice <hr> in html mode
+        message.addLine(Separhtml, html_only=True)
+        # Both text and html
+        message.addLine("debug: show_cmd = git %s" % show_cmd)
+        message.addLine("debug: diff_cmd = git %s" % diff_cmd)
 
     # print whole message to file
-    print >>out, mail.getMessage()
-    sendMail(out, fname)
+    print >>out, message.getMessage()
+    message.sendFile(out, fname)
 
 # Sends notification for a specific revision.
 def commit(current, rev, force=False, subject_head=None):
     if rev in current.reported and not force:
         # Already reported in this run of the script.
-        log("Flagged revision %s for notification, but already reported this time" % rev)
+        log("Flagged revision %s for notification, \
+            but already reported this time" % rev)
         return
 
     log("New revision %s" % rev)
@@ -622,8 +750,10 @@ def commit(current, rev, force=False, subject_head=None):
     subject = git("show '--pretty=format:%%s (%%h)' -s %s" % rev)
     subject = "%s: %s" % (subject_head, subject[0])
 
-    show_cmd = "show -s --no-color --find-copies-harder --pretty=medium %s" % rev
-    diff_cmd = "diff-tree --patch-with-stat --no-color --find-copies-harder --ignore-space-at-eol %s %s" % (merge_diff, rev)
+    show_cmd = "show -s --no-color --find-copies-harder \
+        --pretty=medium %s" % rev
+    diff_cmd = "diff-tree --patch-with-stat --no-color --find-copies-harder \
+        --ignore-space-at-eol %s %s" % (merge_diff, rev)
 
     sendChangeMail(rev, subject, heads, show_cmd, diff_cmd)
 
@@ -644,8 +774,10 @@ def diff(head, first, last):
 
     heads = [head]
 
-    show_cmd = "show -s --no-color --find-copies-harder --pretty=medium %s" % last
-    diff_cmd = "diff --patch-with-stat -m --no-color --find-copies-harder --ignore-space-at-eol %s %s" % (first, last)
+    show_cmd = "show -s --no-color --find-copies-harder \
+        --pretty=medium %s" % last
+    diff_cmd = "diff --patch-with-stat -m --no-color --find-copies-harder \
+        --ignore-space-at-eol %s %s" % (first, last)
 
     sendChangeMail(last, subject, heads, show_cmd, diff_cmd)
 
@@ -675,39 +807,31 @@ def reportPath(current, revs, force=False, subject_head=None):
 # Sends a summary mail for a set of revisions.
 def headMoved(head, path):
     log("Head moved: %s -> %s" % (head, path[-1]))
-    # Start with reasonable defaults.
-    text      = ""
-    html      = "<html>\n"
     (out, fname) = makeTmp()
 
     subject = git("show '--pretty=format:%%s (%%h)' -s %s" % path[-1])
 
-    generateMailHeader("%s's head updated: %s" % (head, subject[0]))
+    # Start with empty message
+    message.init()
+    message.generateMailHeader("%s's head updated: %s" % (head, subject[0]))
 
-    text += "Branch '%s' now includes:" % head
-    text += ""
-    if Config.colordiff:
-        html += "<br><b>Branch</b> '%s' now includes:" % head
-        html += "<br>"
+    message.addLine("Branch '%s' now includes:" % head)
+    message.addLine("")
 
     for rev in path:
-        text += "    " + str(git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0])
-        if Config.colordiff:
-            html += "<br>" % str(git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0])
-
-
-    mail.attachText(text)
-    if Config.colordiff:
-        mail.attachHtml(html)
+        message.addLine("    " +
+            str(git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0]))
 
     # print whole message to file
-    print >>out, mail.getMessage()
-    sendMail(out, fname)
+    print >>out, message.getMessage()
+    message.sendFile(out, fname)
 
 Config = GitConfig(sys.argv[1:])
 
 mail = Mail(Config.smtpserver, Config.smtpport,
             Config.smtplogin, Config.smtppassword, Config.smtpssl)
+#
+message = MailWrapper(mail)
 
 log("Running for %s" % os.getcwd())
 
@@ -785,7 +909,8 @@ if report:
     for head in stable_heads:
         old_rev = cache.heads[head]
         new_rev = current.heads[head]
-        path = git(["rev-list", "--reverse --date-order", new_rev, "^%s" % old_rev])
+        path = git(["rev-list",
+            "--reverse --date-order", new_rev, "^%s" % old_rev])
 
         if head in Config.allchanges:
             # Want to see all commits for this head, even if already reported
@@ -800,3 +925,4 @@ if not Config.noupdate:
     current.writeTo(CacheFile)
 
 deleteTmps()
+
