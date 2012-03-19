@@ -2,7 +2,15 @@
 < #! /usr/bin/env python
 ---
 > #!/usr/bin/env python
-11a12,24
+2a3,9
+> '''
+> This is a fork of ICIR.org git-notifier that implements colorized diff support
+> plus some other nice things.
+> Please refer to https://github.com/tb0hdan/GIT-Notifier for more detail.
+> '''
+> 
+> # pylint: disable=C0103,C0302
+11a19,31
 > import smtplib
 > from re import sub as re_sub, search as re_search, split as re_split
 > from email.mime.multipart import MIMEMultipart
@@ -10,32 +18,32 @@
 > 
 > try:
 >     from pygments import highlight
->     from pygments.lexers import DiffLexer
->     from pygments.formatters import HtmlFormatter
+>     from pygments.lexers import DiffLexer # pylint: disable=E0611
+>     from pygments.formatters import HtmlFormatter # pylint: disable=E0611
 >     pygments_available = True
 > except ImportError:
 >     pygments_available = False
 > 
-16c29,30
+16c36,37
 < Separator = "\n>---------------------------------------------------------------\n"
 ---
 > Separator = "\n>%s\n" % ('-' * 62)
 > Separhtml = "<hr>"
-19a34
+19a41
 > 
-26c41,44
+26c48,51
 <     ("allchanges", True, set(), "branches for which *all* changes are to be reported"),
 ---
 >     ("allchanges", True, set(),
 >      "branches for which *all* changes are to be reported"),
 >     ("altsubject", False, False,
 >      "enables alternative subject with repository name"),
-30c48,49
+30c55,56
 <     ("hostname", True, socket.gethostname(), "host where the repository is hosted"),
 ---
 >     ("hostname", True, socket.gethostname(),
 >      "host where the repository is hosted"),
-33c52,57
+33c59,64
 <     ("manual", True, None, "notifiy for a manually given set of revisions"),
 ---
 >     ("smtpserver", True, 'localhost', "tells SMTP server to use, host only"),
@@ -44,19 +52,19 @@
 >     ("smtppassword", True, None, "sets password for SMTP AUTH"),
 >     ("smtpssl", False, False, "enables SSL for SMTP"),
 >     ("manual", True, None, "notify for a manually given set of revisions"),
-34a59
+34a66
 >     ("colordiff", False, False, "colorize diffs using pygments library"),
-38c63,64
+38c70,71
 <     ("link", True, None, "Link to insert into mail, %s will be replaced with revision"),
 ---
 >     ("link", True, None,
 >      "Link to insert into mail, %s will be replaced with revision"),
-42c68,69
+42c75,76
 <     ("mergediffs", True, set(), "branches for which complete merge diffs are to be included"),
 ---
 >     ("mergediffs", True, set(),
 >      "branches for which complete merge diffs are to be included"),
-45c72,76
+45c79,83
 < class State:
 ---
 > 
@@ -64,71 +72,101 @@
 >     '''
 >     State class
 >     '''
-49a81,83
+49a88,90
 >         '''
 >         Clear data structures
 >         '''
-57a92,94
+57a99,101
 >         '''
 >         Write to cache file
 >         '''
-80a118,120
+67c111
+<             print >>out, "head", head, ref
+---
+>             print >> out, "head", head, ref
+70c114
+<             print >>out, "tag", tag, ref
+---
+>             print >> out, "tag", tag, ref
+73c117
+<             print >>out, "rev", rev
+---
+>             print >> out, "rev", rev
+75,78d118
+<         # No longer used.
+<         #
+<         # for rev in self.diffs:
+<         #     print >>out, "diff", rev
+80a121,123
 >         '''
 >         Read from cache file
 >         '''
-112c152,155
+112c155,158
 < class GitConfig:
 ---
 > class GitConfig(object):
 >     '''
 >     GitConfig class
 >     '''
-118c161,162
+115c161,163
+<         self.maxdiffsize *= 1024 # KBytes to bytes.
+---
+>         # KBytes to bytes.
+>         self.maxdiffsize *= 1024 # pylint: disable=E1101
+> 
+118c166,167
 <             self.allchanges = set([head.strip() for head in self.allchanges.split(",")])
 ---
 >             self.allchanges = \
 >                 set([head.strip() for head in self.allchanges.split(",")])
-121c165,166
+121c170,172
 <             self.mergediffs = set([head.strip() for head in self.mergediffs.split(",")])
 ---
+>             # pylint: disable=E1101
 >             self.mergediffs = \
 >                 set([head.strip() for head in self.mergediffs.split(",")])
-136c181,183
+123c174
+<         if not self.debug:
+---
+>         if not self.debug: # pylint: disable=E1101
+136c187,189
 < 
 ---
 >         '''
 >         Parse command line arguments
 >         '''
-150c197,198
+150c203,204
 <                 parser.add_option("--%s" % name, action=action, dest=name, default=defval, help=help)
 ---
 >                 parser.add_option("--%s" % name, action=action, dest=name,
 >                     default=defval, help=help)
-154c202,203
+154c208,209
 <                 parser.add_option("--%s" % name, action="store", type=type, default=defval, dest=name, help=help)
 ---
 >                 parser.add_option("--%s" % name, action="store", type=type,
 >                     default=defval, dest=name, help=help)
-164a214,216
+164a220,222
 >         '''
 >         Read users from configuration file
 >         '''
-177a230,232
+177a236,238
 >         '''
 >         Return git configuration
 >         '''
-180a236,558
+180a242,571
 > class Colorer(object):
 >     '''
 >     Simple class that uses Pygments library to provide colorized
 >     output (full HTML) for diffs.
 >     '''
 >     def __init__(self):
+>         self.result = ''
 >         if pygments_available:
->             self.formatter = HtmlFormatter(linenos=True, full=True)
+>             self.formatter = HtmlFormatter(linenos=True, full=True,
+>                 encoding="utf-8")
 >             self.lexerobj  = DiffLexer()
 > 
->     def formatDiff(self,data=None):
+>     def formatDiff(self, data=None):
 >         '''
 >         Format diff
 >         '''
@@ -203,6 +241,9 @@
 >                 replacement = '%s:' % keyword
 >             else:
 >                 replacement = keyword
+>             # commit replacement
+>             if (keyword in self.keywords) and (not replacement[:1].isupper()):
+>                 replacement = replacement[0].upper() + replacement[1:]
 >             # git commit email
 >             if re_search('[A|a]uthor', keyword) != None:
 >                 try:
@@ -363,7 +404,7 @@
 >         Send file contents via SMTP
 >         '''
 >         out.close()
->         if Config.debug:
+>         if Config.debug: # pylint: disable=E1101
 >             for line in open(fname):
 >                 print "    |", line,
 >             print ""
@@ -371,6 +412,7 @@
 >             _f = open(fname, 'r+b')
 >             _data = _f.read()
 >             _f.close()
+>             # pylint: disable=E1101
 >             self.mail.send(Config.sender, Config.mailinglist, _data)
 > 
 >     def generateMailHeader(self, subject):
@@ -380,6 +422,7 @@
 >         # TODO: This function should be called only once during run.
 >         repo = _getRepo()
 >         # Reply-To equals to sender, if not set.
+>         # pylint: disable=E1101
 >         replyto = 'Reply-To: %s\n' % \
 >             Config.replyto if Config.replyto else Config.sender
 >         if Config.altsubject:
@@ -401,8 +444,8 @@
 >         '''
 >         Adds message tag
 >         '''
->         if Config.colordiff:
->             formatted = '<br><b>%-11s:</b> %s' % (key, value)
+>         if Config.colordiff: # pylint: disable=E1101
+>             formatted = '<br><b>%-11s:</b> %s\n' % (key, value)
 >             self.addLine(formatted, html_only=True, start_br=False)
 >         else:
 >             formatted = '%-11s: %s' % (key, value)
@@ -416,7 +459,7 @@
 >             self.text_message += line
 >             return
 >         if html_only:
->             if Config.colordiff:
+>             if Config.colordiff: # pylint: disable=E1101
 >                 if start_br:
 >                     self.html_message += '<br>%s' % line
 >                 else:
@@ -424,7 +467,7 @@
 >             return
 >         # TODO: DRY!!!
 >         self.text_message += line
->         if Config.colordiff:
+>         if Config.colordiff: # pylint: disable=E1101
 >             if start_br:
 >                 self.html_message += '<br>%s' % line
 >             else:
@@ -436,42 +479,98 @@
 >         '''
 >         # Message parts should be always attached before returning the message.
 >         self.mail.attachText(self.text_message)
->         if Config.colordiff:
+>         if Config.colordiff: # pylint: disable=E1101
 >             self.mail.attachHtml(self.html_message)
 >         return self.mail.getMessage()
 > 
 > 
-200c578,579
+182c573,576
+<     print >>Config.log, "%s - %s" % (time.asctime(), msg)
+---
+>     '''
+>     Shows message to remote party
+>     '''
+>     print >> Config.log, "%s - %s" % (time.asctime(), msg)
+184a579,581
+>     '''
+>     Uses log() function to notify remote party of errors
+>     '''
+188a586,588
+>     '''
+>     Provides pythonic interface to git executable
+>     '''
+193,194c593,594
+<         if Config.debug:
+<             print >>sys.stderr, "> git " + args
+---
+>         if Config.debug: # pylint: disable=E1101
+>             print >> sys.stderr, "> git " + args
+200c600,601
 <         child = subprocess.Popen("git " + args, shell=True, stdin=None, stdout=stdout_to, stderr=subprocess.PIPE)
 ---
 >         child = subprocess.Popen("git " + args, shell=True, stdin=None,
 >             stdout=stdout_to, stderr=subprocess.PIPE)
-261,265c640
+217a619,621
+>     '''
+>     Retrieves information about repository heads
+>     '''
+224a629,631
+>     '''
+>     Retrieves information about repository tags
+>     '''
+231c638
+<                 tag= tag[10:]
+---
+>                 tag = tag[10:]
+235a643,646
+>     '''
+>     Retrieves information about reachable repository revisions.
+>     Result is an array.
+>     '''
+239a651,653
+>     '''
+>     Read current state from file.
+>     '''
+249a664,666
+>     '''
+>     Create temporary files
+>     '''
+257a675,677
+>     '''
+>     Delete temporary files
+>     '''
+261,267c681,685
 < def mailTag(key, value):
 <     return "%-11s: %s" % (key, value)
 < 
 < def generateMailHeader(subject):
 < 
+<     repo = Config.repouri
+< 
 ---
 > def _getRepo():
-267d641
+>     '''
+>     Retrieve repository path
+>     '''
+>     repo = Config.repouri # pylint: disable=E1101
+269d686
 < 
-269d642
-< 
-272c645,646
+272c689,691
 <             repo = "ssh://%s@%s/%s" % (whoami, Config.hostname, os.path.basename(os.getcwd()))
 ---
+>             # pylint: disable=E1101
 >             repo = "ssh://%s@%s/%s" % (whoami, Config.hostname,
 >                 os.path.basename(os.getcwd()))
-275,276c649,650
+275,276c694,696
 <             repo = "ssh://%s/%s" % (Config.hostname, os.path.basename(os.getcwd()))
 < 
 ---
+>             # pylint: disable=E1101
 >             repo = "ssh://%s/%s" % (Config.hostname,
 >                 os.path.basename(os.getcwd()))
-278a653
+278a699
 >     return repo
-280,314d654
+280,314d700
 <     (out, fname) = makeTmp()
 < 
 <     replyto = "Reply-To: %s\n" % Config.replyto if Config.replyto else ""
@@ -507,9 +606,13 @@
 <     # which may then make them appear to have arrived in the wrong order.
 <     if not Config.debug:
 <         time.sleep(2)
-317a658
+316a703,705
+>     '''
+>     Hook for adding an entry
+>     '''
+317a707
 >     (out, fname) = makeTmp()
-319,324c660,669
+319,324c709,718
 <     (out, fname) = generateMailHeader("%s '%s' created" % (key, value))
 < 
 <     print >>out, mailTag("New %s" % key, value)
@@ -525,11 +628,15 @@
 >     message.addTag("Referencing", rev)
 > 
 >     # print whole message to file
->     print >>out, message.getMessage()
+>     print >> out, message.getMessage()
 >     message.sendFile(out, fname)
-327a673
+326a721,723
+>     '''
+>     Hook for deleting an entry
+>     '''
+327a725
 >     (out, fname) = makeTmp()
-329,333c675,683
+329,333c727,735
 <     (out, fname) = generateMailHeader("%s '%s' deleted" % (key, value))
 < 
 <     print >>out, mailTag("Deleted %s" % key, value)
@@ -543,12 +650,19 @@
 >     message.addTag("Deleted %s" % key, value)
 > 
 >     # print whole message to file
->     print >>out, message.getMessage()
+>     print >> out, message.getMessage()
 >     message.sendFile(out, fname)
-338,339c688,696
+335,336d736
+< # Sends a mail for a notification consistent of two parts: (1) the output of a
+< # show command, and (2) the output of a diff command.
+338,339c738,750
 < 
 <     (out, fname) = generateMailHeader(subject)
 ---
+>     '''
+>     Sends a mail for a notification consistent of two parts: (1) the output of
+>     a show command, and (2) the output of a diff command.
+>     '''
 >     repo = _getRepo()
 >     # The 'git show' prettifier
 >     prettyhtml = PrettyHTML(subject='Git commit %s' % subject[-9:])
@@ -558,69 +672,73 @@
 >     (out, fname) = makeTmp()
 >     #
 >     message.addTag("Repository", repo)
-344c701
+344c755
 <     print >>out, mailTag("On branch%s" % multi, heads)
 ---
 >     message.addTag("On branch%s" % multi, heads)
-348c705
+346,348c757,759
+<     if Config.link:
+<         url = Config.link.replace("%s", rev)
 <         print >>out, mailTag("Link", url)
 ---
+>     if Config.link: # pylint: disable=E1101
+>         url = Config.link.replace("%s", rev) # pylint: disable=E1101
 >         message.addTag("Link", url)
-366d722
+366,368c777,779
 < 
-368c724,725
+<         if size > Config.maxdiffsize:
 <             footer = "\nDiff suppressed because of size. To see it, use:\n\n    git %s" % diff_cmd
 ---
+>         if size > Config.maxdiffsize: # pylint: disable=E1101
 >             footer = "\nDiff suppressed because of size.\n \
 >                 To see it, use:\n\n    git %s" % diff_cmd
-371c728,730
+371c782,784
 <     print >>out, Separator
 ---
 >     message.addLine(Separator, text_only=True)
 >     # Use nice <hr> in html mode
 >     message.addLine(Separhtml, html_only=True)
-375c734,735
+375c788,789
 <             print >>out, Separator
 ---
 >             message.addLine(Separator, text_only=True)
 >             message.addLine(Separhtml, html_only=True)
-377c737,739
+377c791,793
 <             print >>out, line
 ---
 >             message.addLine(line + "\n", text_only=True)
 >             message.addLine(prettyhtml.convert(line) + "\n",
 >                 html_only=True, start_br=False)
-379c741,742
+379c795,796
 <     print >>out, Separator
 ---
 >     message.addLine(Separator, text_only=True)
 >     message.addLine(Separhtml, html_only=True)
-380a744
+380a798
 >     # Text only, read diff from file
-383c747
+383,385c801
 <             print >>out, line,
----
->             message.addLine(line, text_only=True)
-385c749,753
+< 
 <     print >>out, footer
 ---
->     # HTML only, read and parse diff
->     if Config.colordiff and tname:
->         colorer = Colorer()
->         message.addLine(colorer.colorizeFile(tname, key_start='diff\ --git'),
->             html_only=True, start_br=False)
-387,390c755,756
+>             message.addLine(line, text_only=True)
+387,390c803,823
 <     if Config.debug:
 <         print >>out, "-- "
 <         print >>out, "debug: show_cmd = git %s" % show_cmd
 <         print >>out, "debug: diff_cmd = git %s" % diff_cmd
 ---
+>     # HTML only, read and parse diff
+>     if Config.colordiff and tname: # pylint: disable=E1101
+>         colorer = Colorer()
+>         message.addLine('\n', html_only=True, start_br=False)
+>         message.addLine(colorer.colorizeFile(tname, key_start='diff\ --git'),
+>             html_only=True, start_br=False)
+> 
 >     message.addLine(footer, text_only=True)
 >     message.addLine(footer.replace("\n", "<br>\n"), html_only=True)
-392c758,768
-<     sendMail(out, fname)
----
->     if Config.debug:
+> 
+>     if Config.debug: # pylint: disable=E1101
 >         message.addLine("-- ", text_only=True)
 >         # Use nice <hr> in html mode
 >         message.addLine(Separhtml, html_only=True)
@@ -629,14 +747,22 @@
 >         message.addLine("debug: diff_cmd = git %s" % diff_cmd)
 > 
 >     # print whole message to file
->     print >>out, message.getMessage()
+>     print >> out, message.getMessage()
 >     message.sendFile(out, fname)
-398c774,775
+392,394d824
+<     sendMail(out, fname)
+< 
+< # Sends notification for a specific revision.
+395a826,828
+>     '''
+>     Sends notification for a specific revision.
+>     '''
+398c831,832
 <         log("Flagged revision %s for notification, but already reported this time" % rev)
 ---
 >         log("Flagged revision %s for notification, \
 >             but already reported this time" % rev)
-417,418c794,797
+417,418c851,854
 <     show_cmd = "show -s --no-color --find-copies-harder --pretty=medium %s" % rev
 <     diff_cmd = "diff-tree --patch-with-stat --no-color --find-copies-harder --ignore-space-at-eol %s %s" % (merge_diff, rev)
 ---
@@ -644,7 +770,16 @@
 >         --pretty=medium %s" % rev
 >     diff_cmd = "diff-tree --patch-with-stat --no-color --find-copies-harder \
 >         --ignore-space-at-eol %s %s" % (merge_diff, rev)
-439,440c818,821
+422,424d857
+< # Sends a diff between two revisions.
+< #
+< # Only used in manual mode now.
+425a859,862
+>     '''
+>     Sends a diff between two revisions.
+>     Only used in manual mode now.
+>     '''
+439,440c876,879
 <     show_cmd = "show -s --no-color --find-copies-harder --pretty=medium %s" % last
 <     diff_cmd = "diff --patch-with-stat -m --no-color --find-copies-harder --ignore-space-at-eol %s %s" % (first, last)
 ---
@@ -652,41 +787,67 @@
 >         --pretty=medium %s" % last
 >     diff_cmd = "diff --patch-with-stat -m --no-color --find-copies-harder \
 >         --ignore-space-at-eol %s %s" % (first, last)
-469a851
+444,447d882
+< # Sends pair-wise diffs for a path of revisions. Also records all revision on
+< # the path as seen.
+< #
+< # Only used in manual mode now.
+448a884,888
+>     '''
+>     Sends pair-wise diffs for a path of revisions. Also records all revision on
+>     the path as seen.
+>     Only used in manual mode now.
+>     '''
+456d895
+< # Sends a commit notifications for a set of revisions.
+457a897,900
+>     '''
+>     Sends a commit notifications for a set of revisions.
+>     '''
+> 
+467d909
+< # Sends a summary mail for a set of revisions.
+468a911,913
+>     '''
+>     Sends a summary mail for a set of revisions.
+>     '''
+469a915
 >     (out, fname) = makeTmp()
-473c855,857
+473c919,921
 <     (out, fname) = generateMailHeader("%s's head updated: %s" % (head, subject[0]))
 ---
 >     # Start with empty message
 >     message.init()
 >     message.generateMailHeader("%s's head updated: %s" % (head, subject[0]))
-475,476c859,860
+475,476c923,924
 <     print >>out, "Branch '%s' now includes:" % head
 <     print >>out, ""
 ---
 >     message.addLine("Branch '%s' now includes:" % head)
 >     message.addLine("")
-479c863,864
+479c927,928
 <         print >>out, "    ", git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0]
 ---
 >         message.addLine("    " +
 >             str(git("show -s --pretty=oneline --abbrev-commit %s" % rev)[0]))
-481c866,868
+481c930,932
 <     sendMail(out, fname)
 ---
 >     # print whole message to file
->     print >>out, message.getMessage()
+>     print >> out, message.getMessage()
 >     message.sendFile(out, fname)
-484a872,876
+483a935,939
+> # pylint: disable=E1101
 > mail = Mail(Config.smtpserver, Config.smtpport,
 >             Config.smtplogin, Config.smtppassword, Config.smtpssl)
 > #
 > message = MailWrapper(mail)
-> 
-561c953,954
+489c945
+<         print >>sys.stderr, "[Option %s: %s]" % (name, Config.__dict__[name])
+---
+>         print >> sys.stderr, "[Option %s: %s]" % (name, Config.__dict__[name])
+561c1017,1018
 <         path = git(["rev-list", "--reverse --date-order", new_rev, "^%s" % old_rev])
 ---
 >         path = git(["rev-list",
 >             "--reverse --date-order", new_rev, "^%s" % old_rev])
-575a969
-> 
