@@ -40,7 +40,12 @@ NoMail    = "[nomail]"
 
 
 gitolite = "GL_USER" in os.environ
-whoami = os.environ["LOGNAME"]
+# Git via Apache/DAV fix
+try:
+    whoami = os.environ["LOGNAME"]
+except KeyError:
+    import getpass
+    whoami =  getpass.getuser()
 sender = os.environ["GL_USER"] if gitolite else whoami
 
 Options = [
