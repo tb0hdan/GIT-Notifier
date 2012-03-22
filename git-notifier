@@ -266,7 +266,7 @@ class Colorer(object):
                 self.result = highlight(self.data, self.lexerobj,
                     self.formatter)
             except:
-                self.result = data
+                self.result = self.data
         return self.result
 
     def colorizeFile(self, fname=None, key_start=None, key_end=None):
@@ -274,24 +274,27 @@ class Colorer(object):
         Colorizes input file. Result is HTML.
         '''
         if fname and os.path.exists(fname):
-            _f = open(fname, 'r+b')
-            _data = _f.read()
-            _f.close()
+            __data = readfile(fname)
             # We have data, good.
             if (key_start == None) and (key_end == None):
-                return self.formatDiff(_data)
+                return self.formatDiff(__data)
             else:
                 # Since we have text file here such split works just fine.
                 __trigger = False
-                __result_data = ''
-                for line in _data.split('\n'):
+                __result_data = __noformat_data = ''
+                for line in __data.split('\n'):
                     if key_start and (re_search(key_start, line) != None):
                         __trigger = True
                     if key_end   and (re_search(key_end,   line) != None):
                         __trigger = False
                     if  __trigger:
                         __result_data += line + '\n'
-                return self.formatDiff(__result_data)
+                    else:
+                        __noformat_data += line + '\n'
+                __noformat_data ='<pre>%s</pre>' % __noformat_data
+                __result_data = '%s\n%s' % (__noformat_data,
+                        self.formatDiff(__result_data))
+                return __result_data
         else:
             return None
 
@@ -314,10 +317,11 @@ class PrettyHTML(object):
         '''
         Encodes characters to HTML
         '''
-        line = line.replace('<', '&lt;').replace('>', '&gt;')
+        self.line = line
+        self.line = self.line.replace('<', '&lt;').replace('>', '&gt;')
         # Required for mailto subject encoding
-        line = line.replace(' ', '%20')
-        return line
+        self.line = self.line.replace(' ', '%20')
+        return self.line
 
     def make_bold(self, keyword, line):
         '''
@@ -482,12 +486,14 @@ class MailWrapper(object):
         self.text_message = ''
         self.html_message = '<html>\n'
 
-    def init(self, text='', html='<html>\n'):
+    def init(self, text=None, html=None):
         '''
         Start with reasonable defaults.
         '''
-        self.text_message = text
-        self.html_message = html
+        if text:
+            self.text_message = text
+        if html:
+            self.html_message = html
 
     def sendFile(self, out, fname):
         '''
@@ -499,9 +505,7 @@ class MailWrapper(object):
                 print "    |", line,
             print ""
         else:
-            _f = open(fname, 'r+b')
-            _data = _f.read()
-            _f.close()
+            _data = readfile(fname)
             # pylint: disable=E1101
             self.mail.send(Config.sender, Config.mailinglist, _data)
 
@@ -509,8 +513,6 @@ class MailWrapper(object):
         '''
         Generates mail header
         '''
-        # TODO: This function should be called only once during run.
-        repo = _getRepo()
         # Reply-To equals to sender, if not set.
         # pylint: disable=E1101
         replyto = 'Reply-To: %s\n' % \
@@ -547,14 +549,14 @@ class MailWrapper(object):
         '''
         if text_only:
             self.text_message += line
-            return
+            return True
         if html_only:
             if Config.colordiff: # pylint: disable=E1101
                 if start_br:
                     self.html_message += '<br>%s' % line
                 else:
                     self.html_message += line
-            return
+            return True
         # TODO: DRY!!!
         self.text_message += line
         if Config.colordiff: # pylint: disable=E1101
@@ -573,6 +575,21 @@ class MailWrapper(object):
             self.mail.attachHtml(self.html_message)
         return self.mail.getMessage()
 
+
+def readfile(filename=None, mode='r+b'):
+    '''
+    Returns data read from file
+    '''
+    file_data = ''
+    if filename and os.path.exists(filename):
+        f = open(filename, mode)
+        try:
+            file_data = f.read()
+        except:
+            error("Reading file %s failed" % filename)
+        finally:
+            f.close()
+    return file_data
 
 def log(msg):
     '''
@@ -636,9 +653,9 @@ def getTags(state):
     '''
     for (rev, tag) in [head.split() for head in git("show-ref --tags")]:
         # We are only interested in annotaged tags.
-        type = git("cat-file -t %s" % rev)[0]
+        tag_type = git("cat-file -t %s" % rev)[0]
 
-        if type == "tag":
+        if tag_type == "tag":
             if tag.startswith("refs/tags/"):
                 tag = tag[10:]
 
@@ -683,7 +700,7 @@ def deleteTmps():
     for tmp in Tmps:
         os.unlink(tmp)
 
-def _getRepo():
+def getRepo():
     '''
     Retrieve repository path
     '''
@@ -744,7 +761,6 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
     Sends a mail for a notification consistent of two parts: (1) the output of
     a show command, and (2) the output of a diff command.
     '''
-    repo = _getRepo()
     # The 'git show' prettifier
     prettyhtml = PrettyHTML(subject='Git commit %s' % subject[-9:])
     # Start with empty message
@@ -775,6 +791,7 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
 
     else:
         (tmp, tname) = makeTmp()
+        # TODO: Find better place for this
         diff = git(diff_cmd, stdout_to=tmp)
         tmp.close()
 
@@ -936,11 +953,14 @@ def headMoved(head, path):
     print >> out, message.getMessage()
     message.sendFile(out, fname)
 
+# Main run
 Config = GitConfig(sys.argv[1:])
 # pylint: disable=E1101
 mail = Mail(Config.smtpserver, Config.smtpport,
             Config.smtplogin, Config.smtppassword, Config.smtpssl)
-#
+
+repo = getRepo()
+
 message = MailWrapper(mail)
 
 log("Running for %s" % os.getcwd())
