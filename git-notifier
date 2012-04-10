@@ -14,30 +14,43 @@ import socket
 import sys
 import subprocess
 import tempfile
-import time
-
+import logging
 import smtplib
+from time import asctime as time_asctime
 from re import sub as re_sub, search as re_search, split as re_split
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 try:
+    eval("1 if True else 2")
+except SyntaxError:
+    raise ImportError("This software requires ternary support.")
+
+try:
+    import pygments
     from pygments import highlight
     from pygments.lexers import DiffLexer # pylint: disable=E0611
     from pygments.formatters import HtmlFormatter # pylint: disable=E0611
+    # pylint: disable=E0611
+    from pygments.styles import get_style_by_name, STYLE_MAP
     pygments_available = True
 except ImportError:
     pygments_available = False
 
-VERSION   = "0.3-16"  # Filled in automatically.
+if pygments_available:
+    if float(pygments.__version__) < 0.7:
+        logging.warning('You have an outdated Pygments version installed.')
+        logging.warning('Disabling Pygments support.')
+        pygments_available = False
 
-Name      = "git-notifier"
-CacheFile = ".%s.dat" % Name
-Separator = "\n>%s\n" % ('-' * 62)
-Separhtml = "<hr>"
-NoDiff    = "[nodiff]"
-NoMail    = "[nomail]"
-
+VERSION       = "0.4"
+ProjectURL    = "https://github.com/tb0hdan/GIT-Notifier"
+Name          = "git-notifier"
+CacheFile     = ".%s.dat" % Name
+Separator     = "\n>%s\n" % ('-' * 62)
+Separhtml     = "<hr>"
+NoDiff        = "[nodiff]"
+NoMail        = "[nomail]"
 
 gitolite = "GL_USER" in os.environ
 # Git via Apache/DAV fix
@@ -57,6 +70,10 @@ Options = [
     ("debug", False, False, "enable debug output"),
     ("diff", True, None, "mail out diffs between two revisions"),
     ("emailprefix", True, "[git]", "Subject prefix for mails"),
+    ("disablefooter", False, False, 
+    "enables page footer for all commit messages"),
+    ("digest", False, False,
+    "Send multiple commit notification as single message"),
     ("hostname", True, socket.gethostname(),
      "host where the repository is hosted"),
     ("log", True, "%s.log" % Name, "set log output"),
@@ -69,6 +86,8 @@ Options = [
     ("manual", True, None, "notify for a manually given set of revisions"),
     ("maxdiffsize", True, 50, "limit the size of diffs in mails (KB)"),
     ("colordiff", False, False, "colorize diffs using pygments library"),
+    ("colorstyle", True, "tango",
+    "defines style for colordiff option"),
     ("noupdate", False, False, "do not update the state file"),
     ("repouri", True, None, "full URI for the repository"),
     ("sender", True, sender, "sender address for mails"),
@@ -252,8 +271,14 @@ class Colorer(object):
     def __init__(self):
         self.result = ''
         if pygments_available:
+            if not Config.colorstyle in STYLE_MAP:
+                logging.warning('Specified color style not available.')
+                logging.warning('Using default instead.')
+                self.style = 'default'
+            else:
+                self.style = Config.colorstyle
             self.formatter = HtmlFormatter(linenos=True, full=True,
-                encoding="utf-8")
+                encoding="utf-8", style=get_style_by_name(self.style))
             self.lexerobj  = DiffLexer()
 
     def formatDiff(self, data=None):
@@ -375,7 +400,6 @@ class PrettyHTML(object):
             line = '%s<br><b>%s</b>' % (self.extra_tags, line)
         return line
 
-
 class Mail(object):
     '''
     Simple class for notifications via SMTP
@@ -476,15 +500,18 @@ class Mail(object):
             self.connection.quit()
         # Status of message: delivery successful
         return True
-
+        
 class MailWrapper(object):
     '''
     MailWrapper class provides high level interface to Mail class
     '''
     def __init__(self, mail_object):
         self.mail = mail_object
-        self.text_message = ''
-        self.html_message = '<html>\n'
+        self.isLastCommit = True
+        self.text_message_defaults = ''
+        self.text_message = self.text_message_defaults
+        self.html_message_defaults = '<html>\n'
+        self.html_message = self.html_message_defaults
 
     def init(self, text=None, html=None):
         '''
@@ -492,8 +519,12 @@ class MailWrapper(object):
         '''
         if text:
             self.text_message = text
+        elif not Config.digest:
+            self.text_message = self.text_message_defaults
         if html:
             self.html_message = html
+        elif not Config.digest:
+            self.html_message = self.html_message_defaults
 
     def sendFile(self, out, fname):
         '''
@@ -504,7 +535,7 @@ class MailWrapper(object):
             for line in open(fname):
                 print "    |", line,
             print ""
-        else:
+        elif self.isLastCommit:
             _data = readfile(fname)
             # pylint: disable=E1101
             self.mail.send(Config.sender, Config.mailinglist, _data)
@@ -531,7 +562,6 @@ class MailWrapper(object):
         self.mail.addHeader('X-Git-Repository', repo)
         self.mail.addHeader('X-Mailer', Name + ' ' + VERSION)
 
-
     def addTag(self, key, value):
         '''
         Adds message tag
@@ -543,6 +573,16 @@ class MailWrapper(object):
             formatted = '%-11s: %s' % (key, value)
             self.addLine(formatted, text_only=True)
 
+    def __br_process(self, start_br, message, line):
+        '''
+        Internal method to stay DRY
+        '''
+        if start_br:
+            message += '<br>%s' % line
+        else:
+            message += line
+        return message
+
     def addLine(self, line, text_only=False, html_only=False, start_br=True):
         '''
         Adds message line
@@ -552,29 +592,51 @@ class MailWrapper(object):
             return True
         if html_only:
             if Config.colordiff: # pylint: disable=E1101
-                if start_br:
-                    self.html_message += '<br>%s' % line
-                else:
-                    self.html_message += line
+                self.html_message = self.__br_process(start_br, 
+                    self.html_message,line)
             return True
-        # TODO: DRY!!!
         self.text_message += line
         if Config.colordiff: # pylint: disable=E1101
-            if start_br:
-                self.html_message += '<br>%s' % line
-            else:
-                self.html_message += line
+            self.html_message = self.__br_process(start_br, 
+                self.html_message, line)
+        return True
+
+    def setMultiCommit(self, isMultiCommit=False):
+        '''
+        Tells other methods in class that we have multiple commits.
+        '''
+        self.isMultiCommit = isMultiCommit
+        if self.isMultiCommit and Config.digest:
+            self.isLastCommit = False
+        return True
+
+    def setLastCommit(self, isLastCommit=False):
+        '''
+        Tells other methods in class that we have last commit of mutliple.
+        '''
+        if Config.digest:
+            self.isLastCommit = isLastCommit
+        return True
 
     def getMessage(self):
         '''
         Returns whole message
         '''
+        # Add footer to our message (in digest mode do this only once)
+        if Config.disablefooter == False and self.isLastCommit == True:
+            self.footerTextMessage = 'Generated by %s/%s: %s' % (Name,
+                VERSION, ProjectURL)
+            self.footerHtmlMessage = '<br><hr>\nGenerated by %s<br>\n' % \
+                ('<a href="%s">%s/%s</a>' % (ProjectURL, Name, VERSION))
+            self.text_message = '%s\n%s\n' % (self.text_message, 
+                self.footerTextMessage)
+            self.html_message = '%s\n%s\n' % (self.html_message,
+                self.footerHtmlMessage)
         # Message parts should be always attached before returning the message.
         self.mail.attachText(self.text_message)
         if Config.colordiff: # pylint: disable=E1101
             self.mail.attachHtml(self.html_message)
         return self.mail.getMessage()
-
 
 def readfile(filename=None, mode='r+b'):
     '''
@@ -595,7 +657,7 @@ def log(msg):
     '''
     Shows message to remote party
     '''
-    print >> Config.log, "%s - %s" % (time.asctime(), msg)
+    print >> Config.log, "%s - %s" % (time_asctime(), msg)
 
 def error(msg):
     '''
@@ -680,8 +742,6 @@ def getCurrent():
 
     return state
 
-Tmps = []
-
 def makeTmp():
     '''
     Create temporary files
@@ -720,7 +780,6 @@ def getRepo():
             repo = repo[0:-4]
     return repo
 
-
 def entryAdded(key, value, rev):
     '''
     Hook for adding an entry
@@ -728,7 +787,7 @@ def entryAdded(key, value, rev):
     log("New %s %s" % (key, value))
     (out, fname) = makeTmp()
 
-    # Start with empty message
+    # Initialize message
     message.init()
     message.generateMailHeader("%s '%s' created" % (key, value))
 
@@ -746,7 +805,7 @@ def entryDeleted(key, value):
     log("Deleted %s %s" % (key, value))
     (out, fname) = makeTmp()
 
-    # Start with empty message
+    # Initialize message
     message.init()
     message.generateMailHeader("%s '%s' deleted" % (key, value))
 
@@ -763,7 +822,7 @@ def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
     '''
     # The 'git show' prettifier
     prettyhtml = PrettyHTML(subject='Git commit %s' % subject[-9:])
-    # Start with empty message
+    # Initialize message
     message.init()
     message.generateMailHeader(subject)
     (out, fname) = makeTmp()
@@ -919,15 +978,21 @@ def reportPath(current, revs, force=False, subject_head=None):
     '''
     Sends a commit notifications for a set of revisions.
     '''
-
     if not revs:
         return
 
     # Sort updates by time.
     revs = git("rev-list --no-walk --reverse --date-order %s" % " ".join(revs))
 
+    if len(revs) > 1:
+        message.setMultiCommit(True)
+
     for rev in revs:
+        # Get last revision
+        if rev == revs[len(revs)-1]:
+            message.setLastCommit(True)
         commit(current, rev, force=force, subject_head=subject_head)
+
 
 def headMoved(head, path):
     '''
@@ -938,7 +1003,7 @@ def headMoved(head, path):
 
     subject = git("show '--pretty=format:%%s (%%h)' -s %s" % path[-1])
 
-    # Start with empty message
+    # Initialize message
     message.init()
     message.generateMailHeader("%s's head updated: %s" % (head, subject[0]))
 
@@ -954,14 +1019,16 @@ def headMoved(head, path):
     message.sendFile(out, fname)
 
 # Main run
+Tmps = []
+
 Config = GitConfig(sys.argv[1:])
 # pylint: disable=E1101
 mail = Mail(Config.smtpserver, Config.smtpport,
             Config.smtplogin, Config.smtppassword, Config.smtpssl)
 
-repo = getRepo()
-
 message = MailWrapper(mail)
+
+repo = getRepo()
 
 log("Running for %s" % os.getcwd())
 
