@@ -1,10 +1,14 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 '''
 This is a fork of ICIR.org git-notifier that implements colorized diff support
 plus some other nice things.
 Please refer to https://github.com/tb0hdan/GIT-Notifier for more detail.
 '''
+
+# TODO: Test necessity of this.
+from __future__ import with_statement
 
 # pylint: disable=C0103,C0302
 import optparse
@@ -17,6 +21,7 @@ import tempfile
 import logging
 import smtplib
 from time import asctime as time_asctime
+from urllib import urlopen as urllib_urlopen
 from re import sub as re_sub, search as re_search, split as re_split
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -24,7 +29,7 @@ from email.mime.text import MIMEText
 try:
     eval("1 if True else 2")
 except SyntaxError:
-    raise ImportError("This software requires ternary support.")
+    raise ImportError(u'This software requires ternary support.')
 
 try:
     import pygments
@@ -39,30 +44,33 @@ except ImportError:
 
 if pygments_available:
     if float(pygments.__version__) < 0.7:
-        logging.warning('You have an outdated Pygments version installed.')
-        logging.warning('Disabling Pygments support.')
+        logging.warning(u'You have an outdated Pygments version installed.')
+        logging.warning(u'Disabling Pygments support.')
         pygments_available = False
 
-VERSION       = "0.4-1"
-ProjectURL    = "https://github.com/tb0hdan/GIT-Notifier"
-Name          = "git-notifier"
-CacheFile     = ".%s.dat" % Name
-Separator     = "\n>%s\n" % ('-' * 62)
-Separhtml     = "<hr>"
-NoDiff        = "[nodiff]"
-NoMail        = "[nomail]"
+__license__ = 'BSD'
+__version__ = '0.4-1'
+UpdateURL   = 'https://raw.github.com/tb0hdan/GIT-Notifier/master/git-notifier'
+ProjectURL  = 'https://github.com/tb0hdan/GIT-Notifier'
+Name        = 'git-notifier'
+CacheFile   = '.%s.dat' % Name
+Separator   = '\n>%s\n' % ('-' * 62)
+Separhtml   = '<hr>'
+NoDiff      = '[nodiff]'
+NoMail      = '[nomail]'
 
-gitolite = "GL_USER" in os.environ
+gitolite = 'GL_USER' in os.environ
 # Git via Apache/DAV fix
 try:
-    whoami = os.environ["LOGNAME"]
+    whoami = os.environ['LOGNAME']
 except KeyError:
     import getpass
     whoami =  getpass.getuser()
-sender = os.environ["GL_USER"] if gitolite else whoami
+sender = os.environ['GL_USER'] if gitolite else whoami
 
 Options = [
     # Name, argument, default, help,
+    # NOTE: --version, --help are provided by optparse library itself.
     ("allchanges", True, set(),
      "branches for which *all* changes are to be reported"),
     ("altsubject", False, False,
@@ -70,7 +78,7 @@ Options = [
     ("debug", False, False, "enable debug output"),
     ("diff", True, None, "mail out diffs between two revisions"),
     ("emailprefix", True, "[git]", "Subject prefix for mails"),
-    ("disablefooter", False, False, 
+    ("disablefooter", False, False,
     "enables page footer for all commit messages"),
     ("digest", False, False,
     "Send multiple commit notification as single message"),
@@ -94,6 +102,7 @@ Options = [
     ("link", True, None,
      "Link to insert into mail, %s will be replaced with revision"),
     ("updateonly", False, False, "update state file only, no mails"),
+    ("upgrade", False, False, "upgrade %s installation" % Name),
     ("users", True, None, "location of a user-to-email mapping file"),
     ("replyto", True, None, "email address for reply-to header"),
     ("mergediffs", True, set(),
@@ -173,7 +182,7 @@ class State(object):
                 self.diffs.add(key)
 
             else:
-                utilities.error("unknown type %s in cache file" % type)
+                utilities.error(u'unknown type %s in cache file' % type)
 
 class GitConfig(object):
     '''
@@ -190,7 +199,6 @@ class GitConfig(object):
                 set([head.strip() for head in self.allchanges.split(",")])
 
         if self.mergediffs and not isinstance(self.mergediffs, set):
-            # pylint: disable=E1101
             self.mergediffs = \
                 set([head.strip() for head in self.mergediffs.split(",")])
 
@@ -210,7 +218,7 @@ class GitConfig(object):
         '''
         Parse command line arguments
         '''
-        parser = optparse.OptionParser(version=VERSION)
+        parser = optparse.OptionParser(version=__version__)
 
         for (name, arg, default, help) in Options:
             defval = self._git_config(name, default)
@@ -234,7 +242,7 @@ class GitConfig(object):
         (options, args) = parser.parse_args(args)
 
         if len(args) != 0:
-            parser.error("incorrect number of arguments")
+            parser.error(u'incorrect number of arguments')
 
         for (name, arg, default, help) in Options:
             self.__dict__[name] = options.__dict__[name]
@@ -275,7 +283,7 @@ class GitUtilities(object):
 
         try:
             if Config.debug: # pylint: disable=E1101
-                logging.error("> git %s" % str(args))
+                logging.error(u'> git %s' % str(args))
         except NameError:
             # Config may not be defined yet.
             pass
@@ -284,12 +292,12 @@ class GitUtilities(object):
             child = subprocess.Popen("git " + args, shell=True, stdin=None,
                 stdout=stdout_to, stderr=subprocess.PIPE)
             (stdout, stderr) = child.communicate()
-        except OSError, e:
-            utilities.error("cannot start git: %s" % str(e))
+        except OSError, __error:
+            utilities.error(u'cannot start git: %s' % repr(__error))
 
         if child.returncode != 0 and stderr:
             msg = ": %s" % stderr if stderr else ""
-            utilities.error("git child failed with exit code %d%s" % \
+            utilities.error(u'git child failed with exit code %d%s' % \
                 (child.returncode, msg))
 
         if stdout_to != subprocess.PIPE:
@@ -310,7 +318,7 @@ class GitUtilities(object):
                 head = head[11:]
 
             state.heads[head] = rev
-        return state    
+        return state
 
     def getTags(self, state):
         '''
@@ -354,7 +362,7 @@ class GitUtilities(object):
         Retrieve repository path
         '''
         if self.activeRepo:
-            return self.activeRepo    
+            return self.activeRepo
         repo = Config.repouri # pylint: disable=E1101
         if not repo:
             if gitolite:
@@ -369,7 +377,7 @@ class GitUtilities(object):
                     os.path.basename(os.getcwd()))
             if repo.endswith(".git"):
                 repo = repo[0:-4]
-        self.activeRepo = repo        
+        self.activeRepo = repo
         return self.activeRepo
 
     def entryAdded(self, key, value, rev):
@@ -410,7 +418,7 @@ class GitUtilities(object):
     def sendChangeMail(self, rev, subject, heads, show_cmd, diff_cmd):
         '''
         Sends a mail for a notification consistent of two parts:
-        (1) the output of a show command, 
+        (1) the output of a show command,
         (2) the output of a diff command.
         '''
         # The 'git show' prettifier
@@ -478,7 +486,7 @@ class GitUtilities(object):
         if Config.colordiff and tname: # pylint: disable=E1101
             colorer = Colorer()
             message.addLine('\n', html_only=True, start_br=False)
-            message.addLine(colorer.colorizeFile(tname, 
+            message.addLine(colorer.colorizeFile(tname,
                 key_start='diff\ --git'),
                 html_only=True, start_br=False)
 
@@ -503,8 +511,8 @@ class GitUtilities(object):
         '''
         if rev in current.reported and not force:
             # Already reported in this run of the script.
-            utilities.log("Flagged revision %s for notification, \
-                but already reported this time" % rev)
+            utilities.log(u'Flagged revision %s for notification, \
+                but already reported this time' % rev)
             return
 
         utilities.log("New revision %s" % rev)
@@ -541,7 +549,7 @@ class GitUtilities(object):
         # We record a pseudo-revision to avoid sending the same diff twice.
         rev = "%s-%s" % (head, last)
         if not rev in current.diffs:
-            utilities.log("New diff revision %s" % rev)
+            utilities.log(u'New diff revision %s' % rev)
             current.diffs.add(rev)
 
         utilities.log("Diffing %s..%s" % (first, last))
@@ -624,11 +632,13 @@ class Colorer(object):
     def __init__(self):
         self.result = ''
         if pygments_available:
+            # pylint: disable=E1101
             if not Config.colorstyle in STYLE_MAP:
-                logging.warning('Specified color style not available.')
-                logging.warning('Using default instead.')
+                logging.warning(u'Specified color style not available.')
+                logging.warning(u'Using default instead.')
                 self.style = 'default'
             else:
+                # pylint: disable=E1101
                 self.style = Config.colorstyle
             self.formatter = HtmlFormatter(linenos=True, full=True,
                 encoding="utf-8", style=get_style_by_name(self.style))
@@ -830,9 +840,9 @@ class Mail(object):
         try:
             self.connection = smtplib.SMTP(self.smtp_host)
         except Exception as __error:
-            logging.error('SMTPlib %s contacting server %s:%s' % (repr(__error),
+            logging.error(u'SMTPlib %s contacting server %s:%s' % (repr(__error),
                 self.smtp_host, self.smtp_port))
-            logging.error('Message delivery failed.')
+            logging.error(u'Message delivery failed.')
             return False
         try:
             # identify ourselves, prompting server for supported features
@@ -859,7 +869,7 @@ class Mail(object):
             self.connection.quit()
         # Status of message: delivery successful
         return True
-        
+
 class MailWrapper(object):
     '''
     MailWrapper class provides high level interface to Mail class
@@ -878,11 +888,11 @@ class MailWrapper(object):
         '''
         if text:
             self.text_message = text
-        elif not Config.digest:
+        elif not Config.digest: # pylint: disable=E1101
             self.text_message = self.text_message_defaults
         if html:
             self.html_message = html
-        elif not Config.digest:
+        elif not Config.digest: # pylint: disable=E1101
             self.html_message = self.html_message_defaults
 
     def sendFile(self, out, fname):
@@ -919,7 +929,7 @@ class MailWrapper(object):
             Config.emailprefix + subject, header_append=True)
         self.mail.addHeader('Reply-To', replyto)
         self.mail.addHeader('X-Git-Repository', gitutilities.getRepo())
-        self.mail.addHeader('X-Mailer', Name + ' ' + VERSION)
+        self.mail.addHeader('X-Mailer', Name + ' ' + __version__)
 
     def addTag(self, key, value):
         '''
@@ -951,12 +961,12 @@ class MailWrapper(object):
             return True
         if html_only:
             if Config.colordiff: # pylint: disable=E1101
-                self.html_message = self.__br_process(start_br, 
+                self.html_message = self.__br_process(start_br,
                     self.html_message,line)
             return True
         self.text_message += line
         if Config.colordiff: # pylint: disable=E1101
-            self.html_message = self.__br_process(start_br, 
+            self.html_message = self.__br_process(start_br,
                 self.html_message, line)
         return True
 
@@ -965,6 +975,7 @@ class MailWrapper(object):
         Tells other methods in class that we have multiple commits.
         '''
         self.isMultiCommit = isMultiCommit
+        # pylint: disable=E1101
         if self.isMultiCommit and Config.digest:
             self.isLastCommit = False
         return True
@@ -973,7 +984,7 @@ class MailWrapper(object):
         '''
         Tells other methods in class that we have last commit of mutliple.
         '''
-        if Config.digest:
+        if Config.digest: # pylint: disable=E1101
             self.isLastCommit = isLastCommit
         return True
 
@@ -982,12 +993,13 @@ class MailWrapper(object):
         Returns whole message
         '''
         # Add footer to our message (in digest mode do this only once)
+        # pylint: disable=E1101
         if Config.disablefooter == False and self.isLastCommit == True:
             self.footerTextMessage = 'Generated by %s/%s: %s' % (Name,
-                VERSION, ProjectURL)
+                __version__, ProjectURL)
             self.footerHtmlMessage = '<br><hr>\nGenerated by %s<br>\n' % \
-                ('<a href="%s">%s/%s</a>' % (ProjectURL, Name, VERSION))
-            self.text_message = '%s\n%s\n' % (self.text_message, 
+                ('<a href="%s">%s/%s</a>' % (ProjectURL, Name, __version__))
+            self.text_message = '%s\n%s\n' % (self.text_message,
                 self.footerTextMessage)
             self.html_message = '%s\n%s\n' % (self.html_message,
                 self.footerHtmlMessage)
@@ -998,36 +1010,37 @@ class MailWrapper(object):
         return self.mail.getMessage()
 
 class Utilities(object):
-    def __init__(self):
+    def __init__(self, cfg_obj):
         self.Tmps = []
+        self.cfg_obj = cfg_obj
 
     def readfile(self, filename=None, mode='r+b'):
         '''
-        Returns data read from file
+        Reads data from file.
+        Empty string returned on error.
         '''
         file_data = ''
         if filename and os.path.exists(filename):
-            f = open(filename, mode)
             try:
-                file_data = f.read()
-            except:
-                self.error("Reading file %s failed" % filename)
-            finally:
-                f.close()
+                with open(filename, mode) as f:
+                    file_data = f.read()
+            except Exception as __error:
+                self.error(u'Reading file %s failed: %s' % (filename,
+                    repr(__error)))
         return file_data
 
     def log(self, msg):
         '''
         Shows message to remote party
         '''
-        print >> Config.log, "%s - %s" % (time_asctime(), msg)
+        print >> self.cfg_obj.log, '%s - %s' % (time_asctime(), msg)
         return True
 
     def error(self, msg):
         '''
         Uses log() function to notify remote party of errors
         '''
-        self.log("Error: %s" % msg)
+        self.log(u'Error: %s' % msg)
         sys.exit(1)
 
     def makeTmp(self):
@@ -1036,7 +1049,6 @@ class Utilities(object):
         '''
         (fd, fname) = tempfile.mkstemp(prefix="%s-" % Name, suffix=".tmp")
         self.Tmps += [fname]
-
         return (os.fdopen(fd, "w"), fname)
 
     def deleteTmps(self):
@@ -1047,65 +1059,131 @@ class Utilities(object):
             os.unlink(tmp)
         return True
 
+    def upgradeCheck(self):
+        '''
+        Checks git-notifier for available updates,
+        calls __upgradeCode() if necessary.
+        '''
+        if self.cfg_obj.upgrade:
+            self.__upgradeCode()
+        return True
+
+
+    def __upgradeCode(self):
+        '''
+        Upgrades git-notifier from github.
+        Useful for single file intallations.
+        '''
+        try:
+            response = urllib_urlopen(UpdateURL).read()
+        except Exception as __error:
+            logging.error('Unable to contact update server %s: %s' % \
+                (UpdateURL, repr(__error)))
+            response = None
+        if response:
+            try:
+                remote_version = re_search("__version__(.*)'([0-9].+)'", 
+                     response).group(2)
+            except Exception as __error:
+                remote_version = None
+                logging.error('Unable to parse %s remote version: %s' % \
+                    (Name, repr(__error)))
+                return False
+            if remote_version == __version__:
+                logging.warning('%s application is up to date' % Name)
+                return True
+            elif remote_version:
+                logging.warning('Performing upgrade to version %s' % \
+                    remote_version)
+                myself = sys.argv[0]
+                if os.access(myself, os.W_OK):
+                    with open(myself, 'w') as fd:
+                            fd.write(response)
+                    return True
+
 class Notifier(object):
     def __init__(self):
-        utilities.log("Running for %s" % os.getcwd())
+        utilities.log(u'Running for %s' % os.getcwd())
 
     def debugmode(self):
+        '''
+        Shows messages to remote party if --debug option specified.
+        '''
+        # pylint: disable=E1101
         if Config.debug:
             for (name, arg, default, help) in Options:
-                logging.error("[Option %s: %s]" % (name, Config.__dict__[name]))
+                logging.error(u'[Option %s: %s]' % (name, Config.__dict__[name]))
         return True
 
     def cachestate(self):
+        '''
+        Stores cached state, logs message in case of initial run.
+        '''
         self.cache = State()
 
         if os.path.exists(CacheFile):
             self.cache.readFrom(CacheFile)
-            self.report = (not Config.updateonly)
+            self.report = (not Config.updateonly) # pylint: disable=E1101
         else:
-            utilities.log("Initial run. Not generating any mails, just recording current state.")
+            utilities.log(u'Initial run. Not generating any mails, \
+                just recording current state.')
             self.report = False
 
         self.current = gitutilities.getCurrent()
         return True
 
     def diffmode(self):
-        if Config.diff:
-            # Manual diff mode. The argument must be of the form "[old-rev..]new-rev".
+        '''
+        Shows diff. Manual mode only.
+        '''
+        if Config.diff: # pylint: disable=E1101
+            # Manual diff mode.
+            # The argument must be of the form "[old-rev..]new-rev".
+            # pylint: disable=E1101
             path = [rev.strip() for rev in Config.diff.split("..")]
             if len(path) == 1:
                 path = ("%s~2" % path[0], path[0]) # sic! ~2.
             else:
                 path = ("%s~1" % path[0], path[1])
 
-            revs = gitutilities.git(["rev-list", "--reverse --date-order", path[1], "^%s" % path[0]])
-
+            revs = gitutilities.git(["rev-list", "--reverse --date-order",
+                path[1], "^%s" % path[0]])
             gitutilities.diffPath("<manual-diff>", revs)
 
             sys.exit(0)
         return True
 
     def manualmode(self):
-        if Config.manual:
-            # Manual report mode. The argument must be of the form "[old-rev..]new-rev".
+        '''
+        Shows diff. Manual mode only.
+        '''
+        if Config.manual: # pylint: disable=E1101
+            # Manual report mode.
+            # The argument must be of the form "[old-rev..]new-rev".
+            # pylint: disable=E1101
             path = [rev.strip() for rev in Config.manual.split("..")]
             if len(path) == 1:
                 path = ("%s~1" % path[0], path[0])
 
-            revs = gitutilities.git(["rev-list", "--reverse --date-order", path[1], "^%s" % path[0]])
+            revs = gitutilities.git(["rev-list", "--reverse --date-order",
+                path[1], "^%s" % path[0]])
             gitutilities.reportPath(self.current, revs, force=True)
             sys.exit(0)
         return True
 
     def reportmode(self):
+        '''
+        This method is called under normal operations.
+        Sends commit notifications.
+        '''
         if self.report:
             # Check for changes to the set of heads.
             old = set(self.cache.heads.keys())
             new = set(self.current.heads.keys())
 
             for head in (new - old):
-                gitutilities.entryAdded("branch", head, self.current.heads[head])
+                gitutilities.entryAdded("branch", head,
+                    self.current.heads[head])
 
             for head in (old - new):
                 gitutilities.entryDeleted("branch", head)
@@ -1137,25 +1215,39 @@ class Notifier(object):
                     "--reverse --date-order", new_rev, "^%s" % old_rev])
 
                 if head in Config.allchanges:
-                    # Want to see all commits for this head, even if already reported
+                    # Want to see all commits for this head,
+                    # even if already reported
                     # in the past for some other. So we record these separately.
-                    gitutilities.reportPath(self.current, path, subject_head=head)
+                    gitutilities.reportPath(self.current, path,
+                        subject_head=head)
                 else:
-                    # Just send a summary for heads that now include some new stuff.
+                    # Just send a summary for heads
+                    # that now include some new stuff.
                     if len(set(path) - new_revs):
                         gitutilities.headMoved(head, path)
         return True
 
     def storecache(self):
-        if not Config.noupdate:
+        '''
+        Stores cache after run.
+        '''
+        if not Config.noupdate: # pylint: disable=E1101
             self.current.writeTo(CacheFile)
         return True
 
     def cleanup(self):
+        '''
+        Cleans up after run.
+        temporary files are removed here.
+        '''
         utilities.deleteTmps()
         return True
 
     def run(self):
+        '''
+        Calls Notifier class methods in necessary order.
+        This is the main method as well.
+        '''
         self.debugmode()
         self.cachestate()
         self.diffmode()
@@ -1165,9 +1257,10 @@ class Notifier(object):
         self.cleanup()
 
 if __name__ == "__main__":
-    utilities = Utilities()
     gitutilities = GitUtilities()
     Config = GitConfig(sys.argv[1:])
+    utilities = Utilities(Config)
+    utilities.upgradeCheck()
     # pylint: disable=E1101
     mail = Mail(Config.smtpserver, Config.smtpport,
                 Config.smtplogin, Config.smtppassword, Config.smtpssl)
