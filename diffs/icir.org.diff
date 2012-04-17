@@ -60,7 +60,7 @@
 >         pygments_available = False
 > 
 > __license__ = 'BSD'
-> __version__ = '0.4-1'
+> __version__ = '0.4-3'
 > UpdateURL   = 'https://raw.github.com/tb0hdan/GIT-Notifier/master/git-notifier'
 > ProjectURL  = 'https://github.com/tb0hdan/GIT-Notifier'
 > Name        = 'git-notifier'
@@ -173,21 +173,23 @@
 >         # KBytes to bytes.
 >         self.maxdiffsize *= 1024 # pylint: disable=E1101
 > 
-118c198,199
+118c198,200
 <             self.allchanges = set([head.strip() for head in self.allchanges.split(",")])
 ---
+>             # pylint: disable=E1101
 >             self.allchanges = \
 >                 set([head.strip() for head in self.allchanges.split(",")])
-121c202,203
+121c203,205
 <             self.mergediffs = set([head.strip() for head in self.mergediffs.split(",")])
 ---
+>             # pylint: disable=E1101
 >             self.mergediffs = \
 >                 set([head.strip() for head in self.mergediffs.split(",")])
-123c205
+123c207
 <         if not self.debug:
 ---
 >         if not self.debug: # pylint: disable=E1101
-136,137c218,221
+136,137c220,223
 < 
 <         parser = optparse.OptionParser(version=VERSION)
 ---
@@ -195,32 +197,32 @@
 >         Parse command line arguments
 >         '''
 >         parser = optparse.OptionParser(version=__version__)
-150c234,235
+150c236,237
 <                 parser.add_option("--%s" % name, action=action, dest=name, default=defval, help=help)
 ---
 >                 parser.add_option("--%s" % name, action=action, dest=name,
 >                     default=defval, help=help)
-154c239,240
+154c241,242
 <                 parser.add_option("--%s" % name, action="store", type=type, default=defval, dest=name, help=help)
 ---
 >                 parser.add_option("--%s" % name, action="store", type=type,
 >                     default=defval, dest=name, help=help)
-159c245
+159c247
 <             parser.error("incorrect number of arguments")
 ---
 >             parser.error(u'incorrect number of arguments')
-164a251,253
+164a253,255
 >         '''
 >         Read users from configuration file
 >         '''
-178c267,270
+178c269,272
 <         cfg = git(["config hooks.%s" % key])
 ---
 >         '''
 >         Return git configuration
 >         '''
 >         cfg = gitutilities.git(["config hooks.%s" % key])
-181,264c273,275
+181,268c275,277
 < def log(msg):
 <     print >>Config.log, "%s - %s" % (time.asctime(), msg)
 < 
@@ -305,12 +307,18 @@
 <     return "%-11s: %s" % (key, value)
 < 
 < def generateMailHeader(subject):
+< 
+<     repo = Config.repouri
+< 
+<     if not repo:
 ---
 > class GitUtilities(object):
 >     def __init__(self):
 >         self.activeRepo = None
-266c277,301
-<     repo = Config.repouri
+270,272c279,310
+<         if gitolite:
+<             # Gitolite version.
+<             repo = "ssh://%s@%s/%s" % (whoami, Config.hostname, os.path.basename(os.getcwd()))
 ---
 >     def git(self, args, stdout_to=subprocess.PIPE, all=False):
 >         '''
@@ -337,19 +345,14 @@
 >             msg = ": %s" % stderr if stderr else ""
 >             utilities.error(u'git child failed with exit code %d%s' % \
 >                 (child.returncode, msg))
-268c303,304
-<     if not repo:
----
+> 
 >         if stdout_to != subprocess.PIPE:
 >             return []
-270,272c306,307
-<         if gitolite:
-<             # Gitolite version.
-<             repo = "ssh://%s@%s/%s" % (whoami, Config.hostname, os.path.basename(os.getcwd()))
----
+> 
 >         if not all:
+>             # pylint: disable=E1103
 >             return [line.strip() for line in stdout.split("\n") if line]
-274,322c309
+274,319c312,313
 <             # Standard version.
 <             repo = "ssh://%s/%s" % (Config.hostname, os.path.basename(os.getcwd()))
 < 
@@ -396,12 +399,13 @@
 <     log("New %s %s" % (key, value))
 < 
 <     (out, fname) = generateMailHeader("%s '%s' created" % (key, value))
-< 
+---
+>             # pylint: disable=E1103
+>             return stdout.split("\n")
+321,331c315,435
 <     print >>out, mailTag("New %s" % key, value)
 <     print >>out, mailTag("Referencing", rev)
----
->             return stdout.split("\n")
-324,331c311,431
+< 
 <     sendMail(out, fname)
 < 
 < def entryDeleted(key, value):
@@ -532,43 +536,43 @@
 >         (out, fname) = utilities.makeTmp()
 >         #
 >         message.addTag("Repository", self.getRepo())
-333c433,434
+333c437,438
 <     sendMail(out, fname)
 ---
 >         multi = "es" if len(heads) > 1 else ""
 >         heads = ",".join(heads)
-335,337c436
+335,337c440
 < # Sends a mail for a notification consistent of two parts: (1) the output of a
 < # show command, and (2) the output of a diff command.
 < def sendChangeMail(rev, subject, heads, show_cmd, diff_cmd):
 ---
 >         message.addTag("On branch%s" % multi, heads)
-339c438,440
+339c442,444
 <     (out, fname) = generateMailHeader(subject)
 ---
 >         if Config.link: # pylint: disable=E1101
 >             url = Config.link.replace("%s", rev) # pylint: disable=E1101
 >             message.addTag("Link", url)
-341,342c442,443
+341,342c446,447
 <     multi = "es" if len(heads) > 1 else ""
 <     heads = ",".join(heads)
 ---
 >         footer = ""
 >         show = self.git(show_cmd)
-344c445,447
+344c449,451
 <     print >>out, mailTag("On branch%s" % multi, heads)
 ---
 >         for line in show:
 >             if NoDiff in line:
 >                 break
-346,348c449,450
+346,348c453,454
 <     if Config.link:
 <         url = Config.link.replace("%s", rev)
 <         print >>out, mailTag("Link", url)
 ---
 >             if NoMail in line:
 >                 return
-350,351c452,516
+350,351c456,520
 <     footer = ""
 <     show = git(show_cmd)
 ---
@@ -637,14 +641,14 @@
 >             utilities.log(u'Flagged revision %s for notification, \
 >                 but already reported this time' % rev)
 >             return
-353,355c518,519
+353,355c522,523
 <     for line in show:
 <         if NoDiff in line:
 <             break
 ---
 >         utilities.log("New revision %s" % rev)
 >         current.reported.add(rev)
-357c521,586
+357c525,590
 <         if NoMail in line:
 ---
 >         heads = [head.split()[-1] for head in \
@@ -713,7 +717,7 @@
 >         Sends a commit notifications for a set of revisions.
 >         '''
 >         if not revs:
-360,375c589,685
+360,375c593,689
 <     else:
 <         (tmp, tname) = makeTmp()
 <         diff = git(diff_cmd, stdout_to=tmp)
@@ -828,17 +832,17 @@
 >                 __result_data = '%s\n%s' % (__noformat_data,
 >                         self.formatDiff(__result_data))
 >                 return __result_data
-377,383c687
+377,379c691
 <             print >>out, line
 < 
 <     print >>out, Separator
-< 
+---
+>             return None
+381,549c693,944
 <     if tname:
 <         for line in open(tname):
 <             print >>out, line,
----
->             return None
-385,543c689,943
+< 
 <     print >>out, footer
 < 
 <     if Config.debug:
@@ -998,6 +1002,12 @@
 <     # Check tags.
 <     old = set(cache.tags.keys())
 <     new = set(current.tags.keys())
+< 
+<     for tag in (new - old):
+<         entryAdded("tag", tag, current.tags[tag])
+< 
+<     for tag in (old - new):
+<         entryDeleted("tag", tag)
 ---
 > class PrettyHTML(object):
 >     '''
@@ -1080,18 +1090,11 @@
 >     '''
 >     Simple class for notifications via SMTP
 >     '''
->     def __init__(self, smtp_host, smtp_port, smtp_login,
->         smtp_password, smtp_usessl):
-> 
->         self.smtp_host = smtp_host
->         self.smtp_port = smtp_port
->         self.smtp_login = smtp_login
->         self.smtp_password = smtp_password
->         self.smtp_usessl = smtp_usessl
+>     def __init__(self, cfg_obj):
+>         self.cfg_obj = cfg_obj
 >         # Create message container
 >         # The correct MIME type is multipart/alternative.
 >         self.msg = MIMEMultipart('alternative')
-> 
 > 
 >     def addHeader(self, header, value, header_append=False):
 >         '''
@@ -1151,10 +1154,10 @@
 >         '''
 >         utilities.log("Sending email to %s" % smtp_mailinglist)
 >         try:
->             self.connection = smtplib.SMTP(self.smtp_host)
+>             self.connection = smtplib.SMTP(self.cfg_obj.smtpserver)
 >         except Exception as __error:
 >             logging.error(u'SMTPlib %s contacting server %s:%s' % (repr(__error),
->                 self.smtp_host, self.smtp_port))
+>                 self.cfg_obj.smtpserver, self.cfg_obj.smtpport))
 >             logging.error(u'Message delivery failed.')
 >             return False
 >         try:
@@ -1163,15 +1166,16 @@
 > 
 >             # Encrypt connection if both server supports it
 >             # and self.smtp_usessl is True
->             if self.connection.has_extn('STARTTLS') and self.smtp_usessl:
+>             if self.connection.has_extn('STARTTLS') and self.cfg_obj.smtpssl:
 >                 self.connection.starttls()
 >                 # re-identify ourselves over TLS connection
 >                 self.connection.ehlo()
 > 
 >             # Enable SMTP AUTH if both self.smtp_login and
 >             # self.smtp_password are not empty.
->             if self.smtp_login and self.smtp_password:
->                 self.connection.login(self.smtp_login, self.smtp_password)
+>             if self.cfg_obj.smtplogin and self.cfg_obj.smtppassword:
+>                 self.connection.login(self.cfg_obj.smtplogin, 
+>                     self.cfg_obj.smtppassword)
 > 
 >             # Send message
 >             self.connection.sendmail(smtp_sender, smtp_mailinglist, smtp_data)
@@ -1187,8 +1191,9 @@
 >     '''
 >     MailWrapper class provides high level interface to Mail class
 >     '''
->     def __init__(self, mail_object):
->         self.mail = mail_object
+>     def __init__(self, mail, config):
+>         self.mail = mail
+>         self.cfg_obj = config
 >         self.isLastCommit = True
 >         self.text_message_defaults = ''
 >         self.text_message = self.text_message_defaults
@@ -1201,11 +1206,11 @@
 >         '''
 >         if text:
 >             self.text_message = text
->         elif not Config.digest: # pylint: disable=E1101
+>         elif not self.cfg_obj.digest: # pylint: disable=E1101
 >             self.text_message = self.text_message_defaults
 >         if html:
 >             self.html_message = html
->         elif not Config.digest: # pylint: disable=E1101
+>         elif not self.cfg_obj.digest: # pylint: disable=E1101
 >             self.html_message = self.html_message_defaults
 > 
 >     def sendFile(self, out, fname):
@@ -1213,14 +1218,15 @@
 >         Send file contents via SMTP
 >         '''
 >         out.close()
->         if Config.debug: # pylint: disable=E1101
+>         if self.cfg_obj.debug: # pylint: disable=E1101
 >             for line in open(fname):
->                 print "    |", line,
->             print ""
+>                 print u'    |', line,
+>             print ''
 >         elif self.isLastCommit:
 >             _data = utilities.readfile(fname)
 >             # pylint: disable=E1101
->             self.mail.send(Config.sender, Config.mailinglist, _data)
+>             self.mail.send(self.cfg_obj.sender, 
+>                 self.cfg_obj.mailinglist, _data)
 > 
 >     def generateMailHeader(self, subject):
 >         '''
@@ -1229,17 +1235,18 @@
 >         # Reply-To equals to sender, if not set.
 >         # pylint: disable=E1101
 >         replyto = 'Reply-To: %s\n' % \
->             Config.replyto if Config.replyto else Config.sender
->         if Config.altsubject:
+>             self.cfg_obj.replyto if self.cfg_obj.replyto else \
+>                 self.cfg_obj.sender
+>         if self.cfg_obj.altsubject:
 >             subject = ('Repository: %s Branch: %s ' % \
 >                 (re_sub('ssh://(.+)/', '',gitutilities.getRepo()), subject))
 > 
 >         # Set message headers
->         self.mail.addHeader('From', Config.sender)
->         self.mail.addHeader('To', Config.mailinglist)
+>         self.mail.addHeader('From', self.cfg_obj.sender)
+>         self.mail.addHeader('To', self.cfg_obj.mailinglist)
 >         # Allow only 'Subject' header replacement.
 >         self.mail.addHeader('Subject',
->             Config.emailprefix + subject, header_append=True)
+>             self.cfg_obj.emailprefix + subject, header_append=True)
 >         self.mail.addHeader('Reply-To', replyto)
 >         self.mail.addHeader('X-Git-Repository', gitutilities.getRepo())
 >         self.mail.addHeader('X-Mailer', Name + ' ' + __version__)
@@ -1248,15 +1255,18 @@
 >         '''
 >         Adds message tag
 >         '''
->         if Config.colordiff: # pylint: disable=E1101
+>         if self.cfg_obj.colordiff: # pylint: disable=E1101
 >             formatted = '<br><b>%-11s:</b> %s\n' % (key, value)
 >             self.addLine(formatted, html_only=True, start_br=False)
 >         else:
 >             formatted = '%-11s: %s' % (key, value)
 >             self.addLine(formatted, text_only=True)
-545,546c945,953
-<     for tag in (new - old):
-<         entryAdded("tag", tag, current.tags[tag])
+551,555c946,954
+<     # Notify for unreported commits.
+<     old = set(cache.revs)
+<     new = set(current.revs)
+<     new_revs = (new - old)
+<     reportPath(current, new_revs)
 ---
 >     def __br_process(self, start_br, message, line):
 >         '''
@@ -1267,9 +1277,12 @@
 >         else:
 >             message += line
 >         return message
-548,549c955,1102
-<     for tag in (old - new):
-<         entryDeleted("tag", tag)
+557,561c956,1125
+<     # Do reports for the heads we want to see everything for.
+<     for head in stable_heads:
+<         old_rev = cache.heads[head]
+<         new_rev = current.heads[head]
+<         path = git(["rev-list", "--reverse --date-order", new_rev, "^%s" % old_rev])
 ---
 >     def addLine(self, line, text_only=False, html_only=False, start_br=True):
 >         '''
@@ -1279,12 +1292,12 @@
 >             self.text_message += line
 >             return True
 >         if html_only:
->             if Config.colordiff: # pylint: disable=E1101
+>             if self.cfg_obj.colordiff: # pylint: disable=E1101
 >                 self.html_message = self.__br_process(start_br,
 >                     self.html_message,line)
 >             return True
 >         self.text_message += line
->         if Config.colordiff: # pylint: disable=E1101
+>         if self.cfg_obj.colordiff: # pylint: disable=E1101
 >             self.html_message = self.__br_process(start_br,
 >                 self.html_message, line)
 >         return True
@@ -1295,7 +1308,7 @@
 >         '''
 >         self.isMultiCommit = isMultiCommit
 >         # pylint: disable=E1101
->         if self.isMultiCommit and Config.digest:
+>         if self.isMultiCommit and self.cfg_obj.digest:
 >             self.isLastCommit = False
 >         return True
 > 
@@ -1303,7 +1316,7 @@
 >         '''
 >         Tells other methods in class that we have last commit of mutliple.
 >         '''
->         if Config.digest: # pylint: disable=E1101
+>         if self.cfg_obj.digest: # pylint: disable=E1101
 >             self.isLastCommit = isLastCommit
 >         return True
 > 
@@ -1313,7 +1326,7 @@
 >         '''
 >         # Add footer to our message (in digest mode do this only once)
 >         # pylint: disable=E1101
->         if Config.disablefooter == False and self.isLastCommit == True:
+>         if self.cfg_obj.disablefooter == False and self.isLastCommit == True:
 >             self.footerTextMessage = 'Generated by %s/%s: %s' % (Name,
 >                 __version__, ProjectURL)
 >             self.footerHtmlMessage = '<br><hr>\nGenerated by %s<br>\n' % \
@@ -1324,7 +1337,7 @@
 >                 self.footerHtmlMessage)
 >         # Message parts should be always attached before returning the message.
 >         self.mail.attachText(self.text_message)
->         if Config.colordiff: # pylint: disable=E1101
+>         if self.cfg_obj.colordiff: # pylint: disable=E1101
 >             self.mail.attachHtml(self.html_message)
 >         return self.mail.getMessage()
 > 
@@ -1419,31 +1432,21 @@
 >                     with open(myself, 'w') as fd:
 >                             fd.write(response)
 >                     return True
-551,555c1104,1106
-<     # Notify for unreported commits.
-<     old = set(cache.revs)
-<     new = set(current.revs)
-<     new_revs = (new - old)
-<     reportPath(current, new_revs)
----
+> 
 > class Notifier(object):
->     def __init__(self):
+>     def __init__(self, cfg_obj):
+>         self.cfg_obj = cfg_obj
 >         utilities.log(u'Running for %s' % os.getcwd())
-557,561c1108,1122
-<     # Do reports for the heads we want to see everything for.
-<     for head in stable_heads:
-<         old_rev = cache.heads[head]
-<         new_rev = current.heads[head]
-<         path = git(["rev-list", "--reverse --date-order", new_rev, "^%s" % old_rev])
----
+> 
 >     def debugmode(self):
 >         '''
 >         Shows messages to remote party if --debug option specified.
 >         '''
 >         # pylint: disable=E1101
->         if Config.debug:
+>         if self.cfg_obj.debug:
 >             for (name, arg, default, help) in Options:
->                 logging.error(u'[Option %s: %s]' % (name, Config.__dict__[name]))
+>                 logging.error(u'[Option %s: %s]' % (name, 
+>                     self.cfg_obj.__dict__[name]))
 >         return True
 > 
 >     def cachestate(self):
@@ -1451,7 +1454,7 @@
 >         Stores cached state, logs message in case of initial run.
 >         '''
 >         self.cache = State()
-563,566c1124,1126
+563,566c1127,1129
 <         if head in Config.allchanges:
 <             # Want to see all commits for this head, even if already reported
 <             # in the past for some other. So we record these separately.
@@ -1459,8 +1462,8 @@
 ---
 >         if os.path.exists(CacheFile):
 >             self.cache.readFrom(CacheFile)
->             self.report = (not Config.updateonly) # pylint: disable=E1101
-568,573c1128,1147
+>             self.report = (not self.cfg_obj.updateonly) # pylint: disable=E1101
+568,573c1131,1150
 <             # Just send a summary for heads that now include some new stuff.
 <             if len(set(path) - new_revs):
 <                 headMoved(head, path)
@@ -1479,16 +1482,16 @@
 >         '''
 >         Shows diff. Manual mode only.
 >         '''
->         if Config.diff: # pylint: disable=E1101
+>         if self.cfg_obj.diff: # pylint: disable=E1101
 >             # Manual diff mode.
 >             # The argument must be of the form "[old-rev..]new-rev".
 >             # pylint: disable=E1101
->             path = [rev.strip() for rev in Config.diff.split("..")]
+>             path = [rev.strip() for rev in self.cfg_obj.diff.split("..")]
 >             if len(path) == 1:
 >                 path = ("%s~2" % path[0], path[0]) # sic! ~2.
 >             else:
 >                 path = ("%s~1" % path[0], path[1])
-575c1149,1269
+575c1152,1270
 < deleteTmps()
 ---
 >             revs = gitutilities.git(["rev-list", "--reverse --date-order",
@@ -1502,11 +1505,11 @@
 >         '''
 >         Shows diff. Manual mode only.
 >         '''
->         if Config.manual: # pylint: disable=E1101
+>         if self.cfg_obj.manual: # pylint: disable=E1101
 >             # Manual report mode.
 >             # The argument must be of the form "[old-rev..]new-rev".
 >             # pylint: disable=E1101
->             path = [rev.strip() for rev in Config.manual.split("..")]
+>             path = [rev.strip() for rev in self.cfg_obj.manual.split("..")]
 >             if len(path) == 1:
 >                 path = ("%s~1" % path[0], path[0])
 > 
@@ -1534,7 +1537,7 @@
 >                 gitutilities.entryDeleted("branch", head)
 > 
 >             stable_heads = new & old
->             Config.allchanges = Config.allchanges & stable_heads
+>             self.cfg_obj.allchanges = self.cfg_obj.allchanges & stable_heads
 > 
 >             # Check tags.
 >             old = set(self.cache.tags.keys())
@@ -1559,7 +1562,7 @@
 >                 path = gitutilities.git(["rev-list",
 >                     "--reverse --date-order", new_rev, "^%s" % old_rev])
 > 
->                 if head in Config.allchanges:
+>                 if head in self.cfg_obj.allchanges:
 >                     # Want to see all commits for this head,
 >                     # even if already reported
 >                     # in the past for some other. So we record these separately.
@@ -1576,7 +1579,7 @@
 >         '''
 >         Stores cache after run.
 >         '''
->         if not Config.noupdate: # pylint: disable=E1101
+>         if not self.cfg_obj.noupdate: # pylint: disable=E1101
 >             self.current.writeTo(CacheFile)
 >         return True
 > 
@@ -1606,9 +1609,7 @@
 >     Config = GitConfig(sys.argv[1:])
 >     utilities = Utilities(Config)
 >     utilities.upgradeCheck()
->     # pylint: disable=E1101
->     mail = Mail(Config.smtpserver, Config.smtpport,
->                 Config.smtplogin, Config.smtppassword, Config.smtpssl)
->     message = MailWrapper(mail)
->     notifier = Notifier()
+>     mail = Mail(Config)
+>     message = MailWrapper(mail, Config)
+>     notifier = Notifier(Config)
 >     notifier.run()
