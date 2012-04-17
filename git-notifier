@@ -49,7 +49,7 @@ if pygments_available:
         pygments_available = False
 
 __license__ = 'BSD'
-__version__ = '0.4-1'
+__version__ = '0.4-3'
 UpdateURL   = 'https://raw.github.com/tb0hdan/GIT-Notifier/master/git-notifier'
 ProjectURL  = 'https://github.com/tb0hdan/GIT-Notifier'
 Name        = 'git-notifier'
@@ -195,10 +195,12 @@ class GitConfig(object):
 
 
         if self.allchanges and not isinstance(self.allchanges, set):
+            # pylint: disable=E1101
             self.allchanges = \
                 set([head.strip() for head in self.allchanges.split(",")])
 
         if self.mergediffs and not isinstance(self.mergediffs, set):
+            # pylint: disable=E1101
             self.mergediffs = \
                 set([head.strip() for head in self.mergediffs.split(",")])
 
@@ -304,8 +306,10 @@ class GitUtilities(object):
             return []
 
         if not all:
+            # pylint: disable=E1103
             return [line.strip() for line in stdout.split("\n") if line]
         else:
+            # pylint: disable=E1103
             return stdout.split("\n")
 
     def getHeads(self, state):
@@ -767,18 +771,11 @@ class Mail(object):
     '''
     Simple class for notifications via SMTP
     '''
-    def __init__(self, smtp_host, smtp_port, smtp_login,
-        smtp_password, smtp_usessl):
-
-        self.smtp_host = smtp_host
-        self.smtp_port = smtp_port
-        self.smtp_login = smtp_login
-        self.smtp_password = smtp_password
-        self.smtp_usessl = smtp_usessl
+    def __init__(self, cfg_obj):
+        self.cfg_obj = cfg_obj
         # Create message container
         # The correct MIME type is multipart/alternative.
         self.msg = MIMEMultipart('alternative')
-
 
     def addHeader(self, header, value, header_append=False):
         '''
@@ -838,10 +835,10 @@ class Mail(object):
         '''
         utilities.log("Sending email to %s" % smtp_mailinglist)
         try:
-            self.connection = smtplib.SMTP(self.smtp_host)
+            self.connection = smtplib.SMTP(self.cfg_obj.smtpserver)
         except Exception as __error:
             logging.error(u'SMTPlib %s contacting server %s:%s' % (repr(__error),
-                self.smtp_host, self.smtp_port))
+                self.cfg_obj.smtpserver, self.cfg_obj.smtpport))
             logging.error(u'Message delivery failed.')
             return False
         try:
@@ -850,15 +847,16 @@ class Mail(object):
 
             # Encrypt connection if both server supports it
             # and self.smtp_usessl is True
-            if self.connection.has_extn('STARTTLS') and self.smtp_usessl:
+            if self.connection.has_extn('STARTTLS') and self.cfg_obj.smtpssl:
                 self.connection.starttls()
                 # re-identify ourselves over TLS connection
                 self.connection.ehlo()
 
             # Enable SMTP AUTH if both self.smtp_login and
             # self.smtp_password are not empty.
-            if self.smtp_login and self.smtp_password:
-                self.connection.login(self.smtp_login, self.smtp_password)
+            if self.cfg_obj.smtplogin and self.cfg_obj.smtppassword:
+                self.connection.login(self.cfg_obj.smtplogin, 
+                    self.cfg_obj.smtppassword)
 
             # Send message
             self.connection.sendmail(smtp_sender, smtp_mailinglist, smtp_data)
@@ -874,8 +872,9 @@ class MailWrapper(object):
     '''
     MailWrapper class provides high level interface to Mail class
     '''
-    def __init__(self, mail_object):
-        self.mail = mail_object
+    def __init__(self, mail, config):
+        self.mail = mail
+        self.cfg_obj = config
         self.isLastCommit = True
         self.text_message_defaults = ''
         self.text_message = self.text_message_defaults
@@ -888,11 +887,11 @@ class MailWrapper(object):
         '''
         if text:
             self.text_message = text
-        elif not Config.digest: # pylint: disable=E1101
+        elif not self.cfg_obj.digest: # pylint: disable=E1101
             self.text_message = self.text_message_defaults
         if html:
             self.html_message = html
-        elif not Config.digest: # pylint: disable=E1101
+        elif not self.cfg_obj.digest: # pylint: disable=E1101
             self.html_message = self.html_message_defaults
 
     def sendFile(self, out, fname):
@@ -900,14 +899,15 @@ class MailWrapper(object):
         Send file contents via SMTP
         '''
         out.close()
-        if Config.debug: # pylint: disable=E1101
+        if self.cfg_obj.debug: # pylint: disable=E1101
             for line in open(fname):
-                print "    |", line,
-            print ""
+                print u'    |', line,
+            print ''
         elif self.isLastCommit:
             _data = utilities.readfile(fname)
             # pylint: disable=E1101
-            self.mail.send(Config.sender, Config.mailinglist, _data)
+            self.mail.send(self.cfg_obj.sender, 
+                self.cfg_obj.mailinglist, _data)
 
     def generateMailHeader(self, subject):
         '''
@@ -916,17 +916,18 @@ class MailWrapper(object):
         # Reply-To equals to sender, if not set.
         # pylint: disable=E1101
         replyto = 'Reply-To: %s\n' % \
-            Config.replyto if Config.replyto else Config.sender
-        if Config.altsubject:
+            self.cfg_obj.replyto if self.cfg_obj.replyto else \
+                self.cfg_obj.sender
+        if self.cfg_obj.altsubject:
             subject = ('Repository: %s Branch: %s ' % \
                 (re_sub('ssh://(.+)/', '',gitutilities.getRepo()), subject))
 
         # Set message headers
-        self.mail.addHeader('From', Config.sender)
-        self.mail.addHeader('To', Config.mailinglist)
+        self.mail.addHeader('From', self.cfg_obj.sender)
+        self.mail.addHeader('To', self.cfg_obj.mailinglist)
         # Allow only 'Subject' header replacement.
         self.mail.addHeader('Subject',
-            Config.emailprefix + subject, header_append=True)
+            self.cfg_obj.emailprefix + subject, header_append=True)
         self.mail.addHeader('Reply-To', replyto)
         self.mail.addHeader('X-Git-Repository', gitutilities.getRepo())
         self.mail.addHeader('X-Mailer', Name + ' ' + __version__)
@@ -935,7 +936,7 @@ class MailWrapper(object):
         '''
         Adds message tag
         '''
-        if Config.colordiff: # pylint: disable=E1101
+        if self.cfg_obj.colordiff: # pylint: disable=E1101
             formatted = '<br><b>%-11s:</b> %s\n' % (key, value)
             self.addLine(formatted, html_only=True, start_br=False)
         else:
@@ -960,12 +961,12 @@ class MailWrapper(object):
             self.text_message += line
             return True
         if html_only:
-            if Config.colordiff: # pylint: disable=E1101
+            if self.cfg_obj.colordiff: # pylint: disable=E1101
                 self.html_message = self.__br_process(start_br,
                     self.html_message,line)
             return True
         self.text_message += line
-        if Config.colordiff: # pylint: disable=E1101
+        if self.cfg_obj.colordiff: # pylint: disable=E1101
             self.html_message = self.__br_process(start_br,
                 self.html_message, line)
         return True
@@ -976,7 +977,7 @@ class MailWrapper(object):
         '''
         self.isMultiCommit = isMultiCommit
         # pylint: disable=E1101
-        if self.isMultiCommit and Config.digest:
+        if self.isMultiCommit and self.cfg_obj.digest:
             self.isLastCommit = False
         return True
 
@@ -984,7 +985,7 @@ class MailWrapper(object):
         '''
         Tells other methods in class that we have last commit of mutliple.
         '''
-        if Config.digest: # pylint: disable=E1101
+        if self.cfg_obj.digest: # pylint: disable=E1101
             self.isLastCommit = isLastCommit
         return True
 
@@ -994,7 +995,7 @@ class MailWrapper(object):
         '''
         # Add footer to our message (in digest mode do this only once)
         # pylint: disable=E1101
-        if Config.disablefooter == False and self.isLastCommit == True:
+        if self.cfg_obj.disablefooter == False and self.isLastCommit == True:
             self.footerTextMessage = 'Generated by %s/%s: %s' % (Name,
                 __version__, ProjectURL)
             self.footerHtmlMessage = '<br><hr>\nGenerated by %s<br>\n' % \
@@ -1005,7 +1006,7 @@ class MailWrapper(object):
                 self.footerHtmlMessage)
         # Message parts should be always attached before returning the message.
         self.mail.attachText(self.text_message)
-        if Config.colordiff: # pylint: disable=E1101
+        if self.cfg_obj.colordiff: # pylint: disable=E1101
             self.mail.attachHtml(self.html_message)
         return self.mail.getMessage()
 
@@ -1102,7 +1103,8 @@ class Utilities(object):
                     return True
 
 class Notifier(object):
-    def __init__(self):
+    def __init__(self, cfg_obj):
+        self.cfg_obj = cfg_obj
         utilities.log(u'Running for %s' % os.getcwd())
 
     def debugmode(self):
@@ -1110,9 +1112,10 @@ class Notifier(object):
         Shows messages to remote party if --debug option specified.
         '''
         # pylint: disable=E1101
-        if Config.debug:
+        if self.cfg_obj.debug:
             for (name, arg, default, help) in Options:
-                logging.error(u'[Option %s: %s]' % (name, Config.__dict__[name]))
+                logging.error(u'[Option %s: %s]' % (name, 
+                    self.cfg_obj.__dict__[name]))
         return True
 
     def cachestate(self):
@@ -1123,7 +1126,7 @@ class Notifier(object):
 
         if os.path.exists(CacheFile):
             self.cache.readFrom(CacheFile)
-            self.report = (not Config.updateonly) # pylint: disable=E1101
+            self.report = (not self.cfg_obj.updateonly) # pylint: disable=E1101
         else:
             utilities.log(u'Initial run. Not generating any mails, \
                 just recording current state.')
@@ -1136,11 +1139,11 @@ class Notifier(object):
         '''
         Shows diff. Manual mode only.
         '''
-        if Config.diff: # pylint: disable=E1101
+        if self.cfg_obj.diff: # pylint: disable=E1101
             # Manual diff mode.
             # The argument must be of the form "[old-rev..]new-rev".
             # pylint: disable=E1101
-            path = [rev.strip() for rev in Config.diff.split("..")]
+            path = [rev.strip() for rev in self.cfg_obj.diff.split("..")]
             if len(path) == 1:
                 path = ("%s~2" % path[0], path[0]) # sic! ~2.
             else:
@@ -1157,11 +1160,11 @@ class Notifier(object):
         '''
         Shows diff. Manual mode only.
         '''
-        if Config.manual: # pylint: disable=E1101
+        if self.cfg_obj.manual: # pylint: disable=E1101
             # Manual report mode.
             # The argument must be of the form "[old-rev..]new-rev".
             # pylint: disable=E1101
-            path = [rev.strip() for rev in Config.manual.split("..")]
+            path = [rev.strip() for rev in self.cfg_obj.manual.split("..")]
             if len(path) == 1:
                 path = ("%s~1" % path[0], path[0])
 
@@ -1189,7 +1192,7 @@ class Notifier(object):
                 gitutilities.entryDeleted("branch", head)
 
             stable_heads = new & old
-            Config.allchanges = Config.allchanges & stable_heads
+            self.cfg_obj.allchanges = self.cfg_obj.allchanges & stable_heads
 
             # Check tags.
             old = set(self.cache.tags.keys())
@@ -1214,7 +1217,7 @@ class Notifier(object):
                 path = gitutilities.git(["rev-list",
                     "--reverse --date-order", new_rev, "^%s" % old_rev])
 
-                if head in Config.allchanges:
+                if head in self.cfg_obj.allchanges:
                     # Want to see all commits for this head,
                     # even if already reported
                     # in the past for some other. So we record these separately.
@@ -1231,7 +1234,7 @@ class Notifier(object):
         '''
         Stores cache after run.
         '''
-        if not Config.noupdate: # pylint: disable=E1101
+        if not self.cfg_obj.noupdate: # pylint: disable=E1101
             self.current.writeTo(CacheFile)
         return True
 
@@ -1261,9 +1264,7 @@ if __name__ == "__main__":
     Config = GitConfig(sys.argv[1:])
     utilities = Utilities(Config)
     utilities.upgradeCheck()
-    # pylint: disable=E1101
-    mail = Mail(Config.smtpserver, Config.smtpport,
-                Config.smtplogin, Config.smtppassword, Config.smtpssl)
-    message = MailWrapper(mail)
-    notifier = Notifier()
+    mail = Mail(Config)
+    message = MailWrapper(mail, Config)
+    notifier = Notifier(Config)
     notifier.run()

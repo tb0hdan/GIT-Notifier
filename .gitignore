@@ -3,3 +3,6 @@ test-repo.git
 README.html
 version.rst
 .DS_*
+*.log
+*.dat
+*.py?
