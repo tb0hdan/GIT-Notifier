@@ -34,8 +34,8 @@ except SyntaxError:
 try:
     import pygments
     from pygments import highlight
-    from pygments.lexers import DiffLexer # pylint: disable=E0611
-    from pygments.formatters import HtmlFormatter # pylint: disable=E0611
+    from pygments.lexers import DiffLexer  # pylint: disable=E0611
+    from pygments.formatters import HtmlFormatter  # pylint: disable=E0611
     # pylint: disable=E0611
     from pygments.styles import get_style_by_name, STYLE_MAP
     pygments_available = True
@@ -65,7 +65,7 @@ try:
     whoami = os.environ['LOGNAME']
 except KeyError:
     import getpass
-    whoami =  getpass.getuser()
+    whoami = getpass.getuser()
 sender = os.environ['GL_USER'] if gitolite else whoami
 
 Options = [
@@ -109,6 +109,7 @@ Options = [
      "branches for which complete merge diffs are to be included"),
     ]
 
+
 class State(object):
     '''
     State class
@@ -124,8 +125,7 @@ class State(object):
         self.tags = {}
         self.revs = set()
         self.diffs = set()
-
-        self.reported = set() # Revs reported this run so far.
+        self.reported = set()  # Revs reported this run so far.
 
     def writeTo(self, file):
         '''
@@ -147,7 +147,6 @@ class State(object):
 
         for rev in self.revs:
             print >> out, "rev", rev
-
 
     def readFrom(self, file):
         '''
@@ -184,6 +183,7 @@ class State(object):
             else:
                 utilities.error(u'unknown type %s in cache file' % type)
 
+
 class GitConfig(object):
     '''
     GitConfig class
@@ -191,8 +191,7 @@ class GitConfig(object):
     def __init__(self, args):
         self.parseArgs(args)
         # KBytes to bytes.
-        self.maxdiffsize *= 1024 # pylint: disable=E1101
-
+        self.maxdiffsize *= 1024  # pylint: disable=E1101
 
         if self.allchanges and not isinstance(self.allchanges, set):
             # pylint: disable=E1101
@@ -204,7 +203,7 @@ class GitConfig(object):
             self.mergediffs = \
                 set([head.strip() for head in self.mergediffs.split(",")])
 
-        if not self.debug: # pylint: disable=E1101
+        if not self.debug:  # pylint: disable=E1101
             self.log = open(self.log, "a")
         else:
             self.log = sys.stderr
@@ -272,6 +271,7 @@ class GitConfig(object):
         cfg = gitutilities.git(["config hooks.%s" % key])
         return cfg[0] if cfg else default
 
+
 class GitUtilities(object):
     def __init__(self):
         self.activeRepo = None
@@ -284,7 +284,7 @@ class GitUtilities(object):
             args = " ".join(args)
 
         try:
-            if Config.debug: # pylint: disable=E1101
+            if Config.debug:  # pylint: disable=E1101
                 logging.error(u'> git %s' % str(args))
         except NameError:
             # Config may not be defined yet.
@@ -367,7 +367,7 @@ class GitUtilities(object):
         '''
         if self.activeRepo:
             return self.activeRepo
-        repo = Config.repouri # pylint: disable=E1101
+        repo = Config.repouri  # pylint: disable=E1101
         if not repo:
             if gitolite:
                 # Gitolite version.
@@ -439,8 +439,8 @@ class GitUtilities(object):
 
         message.addTag("On branch%s" % multi, heads)
 
-        if Config.link: # pylint: disable=E1101
-            url = Config.link.replace("%s", rev) # pylint: disable=E1101
+        if Config.link:  # pylint: disable=E1101
+            url = Config.link.replace("%s", rev)  # pylint: disable=E1101
             message.addTag("Link", url)
 
         footer = ""
@@ -460,7 +460,7 @@ class GitUtilities(object):
             tmp.close()
 
             size = os.path.getsize(tname)
-            if size > Config.maxdiffsize: # pylint: disable=E1101
+            if size > Config.maxdiffsize:  # pylint: disable=E1101
                 footer = "\nDiff suppressed because of size.\n \
                     To see it, use:\n\n    git %s" % diff_cmd
                 tname = None
@@ -487,7 +487,7 @@ class GitUtilities(object):
                 message.addLine(line, text_only=True)
 
         # HTML only, read and parse diff
-        if Config.colordiff and tname: # pylint: disable=E1101
+        if Config.colordiff and tname:  # pylint: disable=E1101
             colorer = Colorer()
             message.addLine('\n', html_only=True, start_br=False)
             message.addLine(colorer.colorizeFile(tname,
@@ -497,7 +497,7 @@ class GitUtilities(object):
         message.addLine(footer, text_only=True)
         message.addLine(footer.replace("\n", "<br>\n"), html_only=True)
 
-        if Config.debug: # pylint: disable=E1101
+        if Config.debug:  # pylint: disable=E1101
             message.addLine("-- ", text_only=True)
             # Use nice <hr> in html mode
             message.addLine(Separhtml, html_only=True)
@@ -599,7 +599,7 @@ class GitUtilities(object):
 
         for rev in revs:
             # Get last revision
-            if rev == revs[len(revs)-1]:
+            if rev == revs[len(revs) - 1]:
                 message.setLastCommit(True)
             self.commit(current, rev, force=force, subject_head=subject_head)
 
@@ -628,6 +628,7 @@ class GitUtilities(object):
         print >> out, message.getMessage()
         message.sendFile(out, fname)
 
+
 class Colorer(object):
     '''
     Simple class that uses Pygments library to provide colorized
@@ -646,7 +647,7 @@ class Colorer(object):
                 self.style = Config.colorstyle
             self.formatter = HtmlFormatter(linenos=True, full=True,
                 encoding="utf-8", style=get_style_by_name(self.style))
-            self.lexerobj  = DiffLexer()
+            self.lexerobj = DiffLexer()
 
     def formatDiff(self, data=None):
         '''
@@ -683,12 +684,13 @@ class Colorer(object):
                         __result_data += line + '\n'
                     else:
                         __noformat_data += line + '\n'
-                __noformat_data ='<pre>%s</pre>' % __noformat_data
+                __noformat_data = '<pre>%s</pre>' % __noformat_data
                 __result_data = '%s\n%s' % (__noformat_data,
                         self.formatDiff(__result_data))
                 return __result_data
         else:
             return None
+
 
 class PrettyHTML(object):
     '''
@@ -766,6 +768,7 @@ class PrettyHTML(object):
                 self.extra_tags = ''
             line = '%s<br><b>%s</b>' % (self.extra_tags, line)
         return line
+
 
 class Mail(object):
     '''
@@ -855,7 +858,7 @@ class Mail(object):
             # Enable SMTP AUTH if both self.smtp_login and
             # self.smtp_password are not empty.
             if self.cfg_obj.smtplogin and self.cfg_obj.smtppassword:
-                self.connection.login(self.cfg_obj.smtplogin, 
+                self.connection.login(self.cfg_obj.smtplogin,
                     self.cfg_obj.smtppassword)
 
             # Send message
@@ -867,6 +870,7 @@ class Mail(object):
             self.connection.quit()
         # Status of message: delivery successful
         return True
+
 
 class MailWrapper(object):
     '''
@@ -887,11 +891,11 @@ class MailWrapper(object):
         '''
         if text:
             self.text_message = text
-        elif not self.cfg_obj.digest: # pylint: disable=E1101
+        elif not self.cfg_obj.digest:  # pylint: disable=E1101
             self.text_message = self.text_message_defaults
         if html:
             self.html_message = html
-        elif not self.cfg_obj.digest: # pylint: disable=E1101
+        elif not self.cfg_obj.digest:  # pylint: disable=E1101
             self.html_message = self.html_message_defaults
 
     def sendFile(self, out, fname):
@@ -899,14 +903,14 @@ class MailWrapper(object):
         Send file contents via SMTP
         '''
         out.close()
-        if self.cfg_obj.debug: # pylint: disable=E1101
+        if self.cfg_obj.debug:  # pylint: disable=E1101
             for line in open(fname):
                 print u'    |', line,
             print ''
         elif self.isLastCommit:
             _data = utilities.readfile(fname)
             # pylint: disable=E1101
-            self.mail.send(self.cfg_obj.sender, 
+            self.mail.send(self.cfg_obj.sender,
                 self.cfg_obj.mailinglist, _data)
 
     def generateMailHeader(self, subject):
@@ -920,7 +924,7 @@ class MailWrapper(object):
                 self.cfg_obj.sender
         if self.cfg_obj.altsubject:
             subject = ('Repository: %s Branch: %s ' % \
-                (re_sub('ssh://(.+)/', '',gitutilities.getRepo()), subject))
+                (re_sub('ssh://(.+)/', '', gitutilities.getRepo()), subject))
 
         # Set message headers
         self.mail.addHeader('From', self.cfg_obj.sender)
@@ -936,7 +940,7 @@ class MailWrapper(object):
         '''
         Adds message tag
         '''
-        if self.cfg_obj.colordiff: # pylint: disable=E1101
+        if self.cfg_obj.colordiff:  # pylint: disable=E1101
             formatted = '<br><b>%-11s:</b> %s\n' % (key, value)
             self.addLine(formatted, html_only=True, start_br=False)
         else:
@@ -961,12 +965,12 @@ class MailWrapper(object):
             self.text_message += line
             return True
         if html_only:
-            if self.cfg_obj.colordiff: # pylint: disable=E1101
+            if self.cfg_obj.colordiff:  # pylint: disable=E1101
                 self.html_message = self.__br_process(start_br,
-                    self.html_message,line)
+                    self.html_message, line)
             return True
         self.text_message += line
-        if self.cfg_obj.colordiff: # pylint: disable=E1101
+        if self.cfg_obj.colordiff:  # pylint: disable=E1101
             self.html_message = self.__br_process(start_br,
                 self.html_message, line)
         return True
@@ -985,7 +989,7 @@ class MailWrapper(object):
         '''
         Tells other methods in class that we have last commit of mutliple.
         '''
-        if self.cfg_obj.digest: # pylint: disable=E1101
+        if self.cfg_obj.digest:  # pylint: disable=E1101
             self.isLastCommit = isLastCommit
         return True
 
@@ -1006,9 +1010,10 @@ class MailWrapper(object):
                 self.footerHtmlMessage)
         # Message parts should be always attached before returning the message.
         self.mail.attachText(self.text_message)
-        if self.cfg_obj.colordiff: # pylint: disable=E1101
+        if self.cfg_obj.colordiff:  # pylint: disable=E1101
             self.mail.attachHtml(self.html_message)
         return self.mail.getMessage()
+
 
 class Utilities(object):
     def __init__(self, cfg_obj):
@@ -1069,7 +1074,6 @@ class Utilities(object):
             self.__upgradeCode()
         return True
 
-
     def __upgradeCode(self):
         '''
         Upgrades git-notifier from github.
@@ -1083,7 +1087,7 @@ class Utilities(object):
             response = None
         if response:
             try:
-                remote_version = re_search("__version__(.*)'([0-9].+)'", 
+                remote_version = re_search("__version__(.*)'([0-9].+)'",
                      response).group(2)
             except Exception as __error:
                 remote_version = None
@@ -1102,6 +1106,7 @@ class Utilities(object):
                             fd.write(response)
                     return True
 
+
 class Notifier(object):
     def __init__(self, cfg_obj):
         self.cfg_obj = cfg_obj
@@ -1114,7 +1119,7 @@ class Notifier(object):
         # pylint: disable=E1101
         if self.cfg_obj.debug:
             for (name, arg, default, help) in Options:
-                logging.error(u'[Option %s: %s]' % (name, 
+                logging.error(u'[Option %s: %s]' % (name,
                     self.cfg_obj.__dict__[name]))
         return True
 
@@ -1126,7 +1131,7 @@ class Notifier(object):
 
         if os.path.exists(CacheFile):
             self.cache.readFrom(CacheFile)
-            self.report = (not self.cfg_obj.updateonly) # pylint: disable=E1101
+            self.report = (not self.cfg_obj.updateonly)  # pylint: disable=E1101
         else:
             utilities.log(u'Initial run. Not generating any mails, \
                 just recording current state.')
@@ -1139,13 +1144,13 @@ class Notifier(object):
         '''
         Shows diff. Manual mode only.
         '''
-        if self.cfg_obj.diff: # pylint: disable=E1101
+        if self.cfg_obj.diff:  # pylint: disable=E1101
             # Manual diff mode.
             # The argument must be of the form "[old-rev..]new-rev".
             # pylint: disable=E1101
             path = [rev.strip() for rev in self.cfg_obj.diff.split("..")]
             if len(path) == 1:
-                path = ("%s~2" % path[0], path[0]) # sic! ~2.
+                path = ("%s~2" % path[0], path[0])  # sic! ~2.
             else:
                 path = ("%s~1" % path[0], path[1])
 
@@ -1160,7 +1165,7 @@ class Notifier(object):
         '''
         Shows diff. Manual mode only.
         '''
-        if self.cfg_obj.manual: # pylint: disable=E1101
+        if self.cfg_obj.manual:  # pylint: disable=E1101
             # Manual report mode.
             # The argument must be of the form "[old-rev..]new-rev".
             # pylint: disable=E1101
@@ -1234,7 +1239,7 @@ class Notifier(object):
         '''
         Stores cache after run.
         '''
-        if not self.cfg_obj.noupdate: # pylint: disable=E1101
+        if not self.cfg_obj.noupdate:  # pylint: disable=E1101
             self.current.writeTo(CacheFile)
         return True
 
