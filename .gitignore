@@ -4,5 +4,5 @@ README.html
 version.rst
 .DS_*
 *.log
-*.dat
+*.dat*
 *.py?
