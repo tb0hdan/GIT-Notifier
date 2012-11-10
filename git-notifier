@@ -43,7 +43,7 @@ except ImportError:
     pygments_available = False
 
 if pygments_available:
-    if float(pygments.__version__[:3]) < 1.6:
+    if float(pygments.__version__[:3]) < 0.7:
         logging.warning(u'You have an outdated Pygments version installed.')
         logging.warning(u'Disabling Pygments support.')
         pygments_available = False
